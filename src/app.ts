@@ -85,6 +85,15 @@ app.use('/api/v1/webhooks', webhooksRoutes);
 app.use('/api/v1/reviews', reviewsRoutes);
 app.use('/api/v1/waitlist', waitlistRoutes);
 
+// Ignorar favicon requests
+app.get('/favicon.ico', (_req: Request, res: Response) => {
+  res.status(204).end();
+});
+
+app.get('/favicon.png', (_req: Request, res: Response) => {
+  res.status(204).end();
+});
+
 // 404 handler
 app.use((_req: Request, res: Response) => {
   res.status(404).json({

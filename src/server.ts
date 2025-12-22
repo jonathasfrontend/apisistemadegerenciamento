@@ -3,6 +3,10 @@ import { env } from './config/env';
 import { logger } from './utils/logger';
 import prisma from './config/db';
 
+// Para Vercel, exportar o app diretamente
+export default app;
+
+// Função para iniciar o servidor (apenas para ambiente local)
 const startServer = async () => {
   try {
     // Test database connection
@@ -45,4 +49,8 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Apenas iniciar o servidor se não estiver no ambiente Vercel
+if (process.env.VERCEL !== '1') {
+  startServer();
+}
+

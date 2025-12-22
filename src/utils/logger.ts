@@ -25,14 +25,37 @@ const format = winston.format.combine(
   winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}`)
 );
 
-const transports = [
+// Configurar transportes baseado no ambiente
+// Em produção (Vercel), usar apenas Console
+// Em desenvolvimento, usar Console + File
+const transports: winston.transport[] = [
   new winston.transports.Console(),
-  new winston.transports.File({
-    filename: 'logs/error.log',
-    level: 'error',
-  }),
-  new winston.transports.File({ filename: 'logs/all.log' }),
 ];
+
+// Adicionar file transports apenas em ambiente local (não serverless)
+if (env.nodeEnv === 'development' || process.env.VERCEL !== '1') {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logsDir = path.join(process.cwd(), 'logs');
+    
+    // Criar diretório de logs se não existir
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    
+    transports.push(
+      new winston.transports.File({
+        filename: 'logs/error.log',
+        level: 'error',
+      }),
+      new winston.transports.File({ filename: 'logs/all.log' })
+    );
+  } catch (error) {
+    // Se não conseguir criar logs em arquivo, apenas usar console
+    console.warn('Não foi possível configurar file logging, usando apenas console');
+  }
+}
 
 export const logger = winston.createLogger({
   level: env.nodeEnv === 'development' ? 'debug' : 'warn',
