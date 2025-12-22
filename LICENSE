@@ -1,0 +1,135 @@
+LICENÇA PROPRIETÁRIA PERSONALIZADA - JPL (Jonathas Proprietary License)
+
+Copyright (c) 2025 Jonathas Oliveira
+Todos os direitos reservados.
+
+PROJETO: API Sistema de Gerenciamento para Salão de Beleza
+AUTOR: Jonathas Oliveira
+ANO: 2025
+CONTATO: jonathas.oliveira@gmail.com | jonathass5678@gmail.com
+
+===================================================================
+
+AVISO IMPORTANTE: Este software e todos os seus componentes são propriedade intelectual exclusiva de Jonathas Oliveira. O uso não autorizado é expressamente proibido e pode resultar em ação legal.
+
+===================================================================
+
+1. DIREITOS AUTORAIS E PROPRIEDADE INTELECTUAL
+
+Este software, incluindo mas não limitado ao código-fonte, documentação, interfaces gráficas, algoritmos, estruturas de dados, arquivos de configuração, assets, imagens, textos, funcionalidades e quaisquer outros componentes relacionados ao projeto "Sistema de Gerenciamento para Salão de Beleza" e demais softwares desenvolvidos por Jonathas Oliveira, são protegidos pelas leis de direitos autorais e propriedade intelectual do Brasil e tratados internacionais.
+
+Todos os direitos, títulos e interesses sobre o software permanecem exclusivamente com Jonathas Oliveira. Esta licença não concede, transfere ou vende quaisquer direitos de propriedade intelectual ao usuário ou terceiros.
+
+2. CONCESSÃO DE LICENÇA RESTRITA
+
+Mediante os termos e condições desta licença, Jonathas Oliveira concede uma licença limitada, não exclusiva, intransferível, revogável e pessoal para:
+
+a) Visualizar e executar o software apenas para fins não comerciais e educacionais;
+b) Utilizar as funcionalidades conforme projetadas pelo autor;
+c) Interagir com o software através das interfaces fornecidas.
+
+Esta licença NÃO concede permissão para:
+- Modificar, alterar, adaptar ou criar obras derivadas;
+- Copiar, reproduzir, duplicar ou clonar o código-fonte;
+- Distribuir, redistribuir, sublicenciar ou revender;
+- Descompilar, fazer engenharia reversa ou tentar extrair o código-fonte;
+- Utilizar para fins comerciais sem autorização expressa e por escrito.
+
+3. RESTRIÇÕES RIGOROSAS DE USO
+
+É EXPRESSAMENTE PROIBIDO:
+
+a) Qualquer uso comercial sem autorização prévia, expressa e por escrito do autor;
+b) Modificação, alteração ou adaptação do código-fonte ou componentes;
+c) Redistribuição em qualquer forma, seja gratuita ou comercial;
+d) Incorporação em outros projetos ou softwares;
+e) Engenharia reversa, descompilação ou desmontagem;
+f) Remoção ou alteração de avisos de direitos autorais;
+g) Criação de obras derivadas ou versões modificadas;
+h) Uso que viole leis aplicáveis ou direitos de terceiros;
+i) Revenda, sublicenciamento ou transferência de direitos;
+j) Upload para repositórios públicos sem autorização;
+k) Fork ou clone não autorizado do repositório;
+l) Uso em ambiente de produção comercial.
+
+4. AUTORIZAÇÃO EXPRESSA OBRIGATÓRIA
+
+Qualquer uso além das permissões expressamente concedidas nesta licença requer autorização prévia, expressa e por escrito de Jonathas Oliveira. Solicitações devem ser enviadas para os endereços de contato fornecidos, especificando:
+
+- Finalidade do uso pretendido;
+- Escopo das modificações desejadas (se aplicável);
+- Duração da utilização;
+- Contexto comercial ou não comercial;
+- Detalhes do projeto ou empresa solicitante.
+
+5. PROTEÇÃO CONTRA VIOLAÇÕES
+
+O autor empregará todas as medidas legais disponíveis para proteger seus direitos de propriedade intelectual, incluindo mas não limitado a:
+
+a) Ações cíveis por violação de direitos autorais;
+b) Pedidos de remoção e cessação de uso não autorizado;
+c) Indenização por danos materiais e morais;
+d) Apreensão de material infrator;
+e) Outras medidas judiciais cabíveis.
+
+6. COLETA E PROCESSAMENTO DE DADOS
+
+O software pode coletar e processar dados de acordo com sua funcionalidade, incluindo:
+
+a) Dados de interação com comandos e funcionalidades;
+b) Informações fornecidas voluntariamente pelo usuário;
+c) Dados técnicos necessários para o funcionamento;
+d) Logs de uso e eventos do sistema.
+
+Todos os dados são tratados conforme a Lei Geral de Proteção de Dados (LGPD) e não são compartilhados com terceiros sem consentimento, exceto quando exigido por lei.
+
+7. ISENÇÃO DE GARANTIAS
+
+O SOFTWARE É FORNECIDO "COMO ESTÁ", SEM GARANTIAS DE QUALQUER TIPO, EXPRESSAS OU IMPLÍCITAS, INCLUINDO MAS NÃO LIMITADO A GARANTIAS DE COMERCIALIZAÇÃO, ADEQUAÇÃO A UM PROPÓSITO ESPECÍFICO E NÃO VIOLAÇÃO.
+
+O autor não garante que o software será livre de erros, vírus ou outros componentes prejudiciais, ou que funcionará ininterruptamente ou sem falhas.
+
+8. LIMITAÇÃO DE RESPONSABILIDADE
+
+EM NENHUMA CIRCUNSTÂNCIA JONATHAS OLIVEIRA SERÁ RESPONSÁVEL POR QUAISQUER DANOS DIRETOS, INDIRETOS, INCIDENTAIS, ESPECIAIS, CONSEQUENCIAIS OU PUNITIVOS, INCLUINDO MAS NÃO LIMITADO A PERDA DE LUCROS, DADOS OU USO, DECORRENTES DO USO OU INCAPACIDADE DE USAR O SOFTWARE.
+
+9. MODIFICAÇÕES E ATUALIZAÇÕES
+
+O autor reserva-se o direito de modificar, atualizar, descontinuar ou alterar o software a qualquer momento, sem aviso prévio. Esta licença pode ser alterada mediante notificação através dos canais oficiais do projeto.
+
+10. REVOGAÇÃO DE LICENÇA
+
+Esta licença pode ser revogada imediatamente, a critério exclusivo do autor, em caso de:
+
+a) Violação de qualquer termo desta licença;
+b) Uso não autorizado ou inadequado do software;
+c) Tentativa de contornar as restrições impostas;
+d) Comportamento prejudicial à reputação do projeto ou autor.
+
+A revogação resulta na cessação imediata de todos os direitos concedidos.
+
+11. JURISDIÇÃO E LEI APLICÁVEL
+
+Esta licença é regida pelas leis da República Federativa do Brasil. Qualquer disputa relacionada a esta licença será submetida à jurisdição exclusiva dos tribunais brasileiros competentes.
+
+12. DISPOSIÇÕES GERAIS
+
+a) Se qualquer disposição desta licença for considerada inválida, as demais permanecem em vigor;
+b) A tolerância com violações não constitui renúncia de direitos;
+c) Esta licença constitui o acordo completo entre as partes;
+d) Não há garantia de continuidade do serviço ou suporte técnico.
+
+13. CONTATO E COMUNICAÇÕES OFICIAIS
+
+Para dúvidas, solicitações de autorização ou comunicações relacionadas a esta licença:
+
+📧 E-mail Principal: jonathas.oliveira@gmail.com
+📧 E-mail Alternativo: jonathass5678@gmail.com
+
+Todas as comunicações oficiais serão realizadas através dos endereços acima.
+
+===================================================================
+
+ATENÇÃO: O uso deste software implica na aceitação integral dos termos desta licença. Se você não concorda com estes termos, não utilize o software.
+
+Data da última atualização: 26 de julho de 2025
