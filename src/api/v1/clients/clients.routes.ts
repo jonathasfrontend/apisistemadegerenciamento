@@ -56,6 +56,13 @@ router.get(
   clientsController.getInactiveClients
 );
 
+// Exportação em massa: permissão dedicada (clients.export), antes de /:id
+router.get(
+  '/export',
+  checkPermission('clients.export'),
+  clientsController.exportClients
+);
+
 router.get(
   '/:id',
   checkPermission('clients.read'),

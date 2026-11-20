@@ -21,11 +21,6 @@ interface EnvConfig {
   rateLimitWindowMs: number;
   rateLimitMaxRequests: number;
   
-  // Supabase
-  supabaseUrl: string;
-  supabaseKey: string;
-  supabaseServiceRoleKey: string;
-  
   // WhatsApp
   whatsappApiUrl: string;
   whatsappAccessToken: string;
@@ -95,11 +90,6 @@ export const env: EnvConfig = {
   // Rate Limiting
   rateLimitWindowMs: parseInt(getEnvVar('RATE_LIMIT_WINDOW_MS', '900000'), 10),
   rateLimitMaxRequests: parseInt(getEnvVar('RATE_LIMIT_MAX_REQUESTS', '100'), 10),
-  
-  // Supabase
-  supabaseUrl: getEnvVarOptional('SUPABASE_URL'),
-  supabaseKey: getEnvVarOptional('SUPABASE_KEY'),
-  supabaseServiceRoleKey: getEnvVarOptional('SUPABASE_SERVICE_ROLE_KEY'),
   
   // WhatsApp
   whatsappApiUrl: getEnvVarOptional('WHATSAPP_API_URL', 'https://graph.facebook.com/v18.0'),

@@ -38,11 +38,12 @@ export class StaffController {
    */
   list = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { isAvailable, specialty } = req.query;
+      const { isAvailable, specialty, search } = req.query;
       
       const filters: any = {};
       if (isAvailable !== undefined) filters.isAvailable = isAvailable === 'true';
       if (specialty) filters.specialty = specialty as string;
+      if (search) filters.search = search as string;
 
       const staff = await this.staffService.list(filters);
       
@@ -218,7 +219,7 @@ export class StaffController {
       });
     } catch (error: any) {
       logger.error('Error assigning role:', error);
-      res.status(400).json({
+      res.status(error.statusCode || 400).json({
         status: 'error',
         message: error.message || 'Failed to assign role',
       });

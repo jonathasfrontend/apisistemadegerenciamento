@@ -1,6 +1,6 @@
-  import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../config/db';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 export class ReportsService {
   // =============================================

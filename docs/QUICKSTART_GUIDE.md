@@ -34,10 +34,6 @@ RATE_LIMIT_MAX_REQUESTS=100
 # Redis (opcional)
 REDIS_URL="redis://localhost:6379"
 
-# Supabase (opcional)
-SUPABASE_URL="your-supabase-url"
-SUPABASE_KEY="your-supabase-key"
-
 # Email (opcional)
 SMTP_HOST="smtp.gmail.com"
 SMTP_PORT=587

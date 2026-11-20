@@ -1,6 +1,9 @@
-import { PrismaClient, Sale, PaymentMethod } from '@prisma/client';
+import { PaymentMethod, Sale } from '@prisma/client';
+import { createPrismaClient } from '../../../config/db';
+import { runSerializable } from '../../../utils/transaction';
+import { crossedLowStock, LowStockProduct, notifyLowStock } from '../products/low-stock';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 interface CreateSaleDTO {
   clientId?: string;
@@ -24,7 +27,10 @@ export class SalesService {
   async create(data: CreateSaleDTO): Promise<Sale> {
     const totalAmount = data.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
 
-    const sale = await prisma.$transaction(async (tx) => {
+    const sale = await runSerializable(prisma, async (tx) => {
+      // Vendas que cruzam o limite de reposição (aviso só depois do commit)
+      const lowStockEvents: { product: LowStockProduct; eventId: string }[] = [];
+
       // Criar venda
       const newSale = await tx.sale.create({
         data: {
@@ -60,7 +66,7 @@ export class SalesService {
           throw new Error(`Insufficient stock for product ${item.productId}`);
         }
 
-        await tx.product.update({
+        const updatedProduct = await tx.product.update({
           where: { id: item.productId },
           data: {
             quantity: {
@@ -70,7 +76,7 @@ export class SalesService {
         });
 
         // Registrar movimentação de estoque
-        await tx.stockMovement.create({
+        const movement = await tx.stockMovement.create({
           data: {
             productId: item.productId,
             type: 'OUT',
@@ -79,12 +85,22 @@ export class SalesService {
             reference: newSale.id,
           },
         });
+
+        // Aviso de estoque baixo só na travessia do limite
+        if (crossedLowStock(product.quantity, updatedProduct.quantity, updatedProduct.reorderThreshold)) {
+          lowStockEvents.push({ product: updatedProduct, eventId: movement.id });
+        }
       }
 
-      return newSale;
+      return { sale: newSale, lowStockEvents };
     });
 
-    return sale;
+    // Avisar depois do commit — notificação é best-effort
+    for (const event of sale.lowStockEvents) {
+      await notifyLowStock(event.product, event.eventId);
+    }
+
+    return sale.sale;
   }
 
   async list(filters: SaleFilters = {}): Promise<Sale[]> {

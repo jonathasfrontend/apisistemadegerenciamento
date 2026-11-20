@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { UsersController } from './users.controller';
 import { authenticate, checkPermission } from '../../../middlewares/auth.jwt';
+import { allowSelfOrPermission } from '../../../middlewares/self-or-permission';
 import { validateZod } from '../../../middlewares/validate';
 import { z } from 'zod';
 
@@ -84,12 +85,12 @@ router.put(
 /**
  * @route   PUT /api/v1/users/:id/password
  * @desc    Alterar senha do usuário
- * @access  Private (Admin, Gerente ou o próprio usuário) - users.update
+ * @access  Private (o próprio usuário sempre; Admin/Gerente para outros) - users.update
  */
 router.put(
   '/:id/password',
   authenticate,
-  checkPermission('users.update'),
+  allowSelfOrPermission('id', 'users.update'),
   validateZod(changePasswordSchema),
   usersController.changePassword
 );

@@ -54,6 +54,14 @@ enum NotificationType {
   PROMOTION
   BIRTHDAY
   REACTIVATION
+  NO_SHOW
+  NEW_USER
+  NEW_STAFF
+  NEW_PRODUCT
+  LOW_STOCK
+  PAYMENT_PENDING
+  PAYMENT_PAID
+  APPOINTMENT_STARTING
 }
 
 enum NotificationChannel {
@@ -61,6 +69,7 @@ enum NotificationChannel {
   EMAIL
   SMS
   PUSH
+  IN_APP
 }
 
 enum NotificationStatus {
@@ -94,6 +103,7 @@ model User {
   staff         Staff?
   auditLogs     AuditLog[]
   createdAppointments Appointment[] @relation("CreatedBy")
+  notifications Notification[]
 
   @@index([roleId])
   @@map("users")
@@ -435,12 +445,19 @@ model SaleItem {
 
 model Notification {
   id            String             @id @default(uuid())
+  userId        String?            @map("user_id")
   appointmentId String?            @map("appointment_id")
+  // Rota interna para onde o clique na notificação leva (/appointments/{id}, ...)
+  link          String?            @map("link")
+  // Chave do evento (ex.: "LOW_STOCK:{produtoId}:{timestamp}") — garante 1
+  // registro por usuário por evento, mesmo com corrida entre worker e reconciliador
+  dedupeKey     String?            @map("dedupe_key")
   type          NotificationType
   channel       NotificationChannel
   recipient     String             // phone or email
   message       String             @db.Text
   status        NotificationStatus @default(PENDING)
+  readAt        DateTime?          @map("read_at")
   scheduledFor  DateTime?          @map("scheduled_for")
   sentAt        DateTime?          @map("sent_at")
   errorMessage  String?            @map("error_message") @db.Text
@@ -448,11 +465,14 @@ model Notification {
   
   createdAt DateTime @default(now()) @map("created_at")
 
+  user          User?        @relation(fields: [userId], references: [id])
   appointment Appointment? @relation(fields: [appointmentId], references: [id])
 
+  @@index([userId])
   @@index([appointmentId])
   @@index([status])
   @@index([scheduledFor])
+  @@unique([userId, dedupeKey])
   @@map("notifications")
 }
 

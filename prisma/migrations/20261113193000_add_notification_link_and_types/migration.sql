@@ -1,0 +1,11 @@
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'NEW_USER';
+ALTER TYPE "NotificationType" ADD VALUE 'NEW_STAFF';
+ALTER TYPE "NotificationType" ADD VALUE 'NEW_PRODUCT';
+ALTER TYPE "NotificationType" ADD VALUE 'LOW_STOCK';
+ALTER TYPE "NotificationType" ADD VALUE 'PAYMENT_PENDING';
+ALTER TYPE "NotificationType" ADD VALUE 'PAYMENT_PAID';
+ALTER TYPE "NotificationType" ADD VALUE 'APPOINTMENT_STARTING';
+
+-- AlterTable
+ALTER TABLE "notifications" ADD COLUMN "link" TEXT;

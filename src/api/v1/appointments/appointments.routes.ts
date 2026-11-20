@@ -28,7 +28,10 @@ const updateAppointmentSchema = z.object({
   body: z.object({
     staffId: z.string().uuid().optional(),
     startTime: z.string().datetime().optional(),
-    status: z.enum(['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NO_SHOW']).optional(),
+    // CANCELLED e NO_SHOW ficam de fora de propósito: precisam passar por
+    // POST /:id/cancel e POST /:id/no-show, que cuidam de pagamento,
+    // contador de faltas, bloqueio e notificação.
+    status: z.enum(['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED']).optional(),
     notes: z.string().optional(),
     isPaid: z.boolean().optional(),
   }),

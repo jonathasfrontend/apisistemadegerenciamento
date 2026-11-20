@@ -1,6 +1,10 @@
-import { PrismaClient, Product, StockMovement } from '@prisma/client';
+import { NotificationType, Product, StockMovement } from '@prisma/client';
+import { createPrismaClient } from '../../../config/db';
+import { notifyResource } from '../notifications/notifications.service';
+import { crossedLowStock, notifyLowStock } from './low-stock';
+import { runSerializable } from '../../../utils/transaction';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 interface CreateProductDTO {
   sku: string;
@@ -30,6 +34,8 @@ interface ProductFilters {
   category?: string;
   isActive?: boolean;
   lowStock?: boolean;
+  search?: string;
+  limit?: number;
 }
 
 export class ProductsService {
@@ -72,6 +78,22 @@ export class ProductsService {
       });
     }
 
+    // Avisar Admin + Recepção (best-effort: nunca derruba a criação do produto)
+    await notifyResource(
+      {
+        type: NotificationType.NEW_PRODUCT,
+        message: `Novo produto cadastrado: ${product.name} (${product.sku})`,
+        link: `/products/${product.id}`,
+        dedupeKey: `NEW_PRODUCT:${product.id}`,
+      },
+      { roleNames: ['Admin', 'Recepção'] }
+    );
+
+    // Produto já criado abaixo do limite de reposição
+    if (product.quantity <= product.reorderThreshold) {
+      await notifyLowStock(product, 'create');
+    }
+
     return product;
   }
 
@@ -95,12 +117,21 @@ export class ProductsService {
       };
     }
 
+    if (filters.search) {
+      where.OR = [
+        { name: { contains: filters.search, mode: 'insensitive' } },
+        { sku: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
     return await prisma.product.findMany({
       where,
       orderBy: [
         { category: 'asc' },
         { name: 'asc' },
       ],
+      // Limite opcional: usado pela busca global para não puxar a tabela inteira
+      ...(filters.limit ? { take: filters.limit } : {}),
     });
   }
 
@@ -188,6 +219,10 @@ export class ProductsService {
 
   /**
    * Remover estoque
+   *
+   * A leitura do saldo + decremento rodam em transação SERIALIZABLE: duas
+   * saídas concorrentes do mesmo produto não podem calcular a travessia do
+   * limite a partir do mesmo estado (evita dois avisos de estoque baixo).
    */
   async removeStock(
     productId: string,
@@ -195,36 +230,52 @@ export class ProductsService {
     reason?: string,
     reference?: string
   ): Promise<Product> {
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-    });
+    const { updatedProduct, crossed } = await runSerializable(prisma, async (tx) => {
+      const product = await tx.product.findUnique({
+        where: { id: productId },
+      });
 
-    if (!product) {
-      throw new Error('Product not found');
-    }
+      if (!product) {
+        throw new Error('Product not found');
+      }
 
-    if (product.quantity < quantity) {
-      throw new Error('Insufficient stock');
-    }
+      if (product.quantity < quantity) {
+        throw new Error('Insufficient stock');
+      }
 
-    const updatedProduct = await prisma.product.update({
-      where: { id: productId },
-      data: {
-        quantity: {
-          decrement: quantity,
+      const updated = await tx.product.update({
+        where: { id: productId },
+        data: {
+          quantity: {
+            decrement: quantity,
+          },
         },
-      },
+      });
+
+      const movement = await tx.stockMovement.create({
+        data: {
+          productId,
+          type: 'OUT',
+          quantity,
+          reason,
+          reference,
+        },
+      });
+
+      // Aviso de estoque baixo só na travessia do limite
+      const didCross = crossedLowStock(
+        product.quantity,
+        updated.quantity,
+        updated.reorderThreshold
+      );
+
+      return { updatedProduct: updated, crossed: didCross ? movement.id : null };
     });
 
-    await prisma.stockMovement.create({
-      data: {
-        productId,
-        type: 'OUT',
-        quantity,
-        reason,
-        reference,
-      },
-    });
+    // Avisar depois do commit — notificação é best-effort
+    if (crossed) {
+      await notifyLowStock(updatedProduct, crossed);
+    }
 
     return updatedProduct;
   }

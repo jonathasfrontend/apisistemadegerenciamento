@@ -32,6 +32,22 @@ interface UpdateClientInput {
   isBlocked?: boolean;
 }
 
+/**
+ * Escapa uma célula CSV.
+ * Além de aspas/quebras de linha, neutraliza fórmulas de planilha
+ * (=, +, -, @, TAB, CR) prefixando apóstrofo — evita CSV injection
+ * (formula injection) ao abrir no Excel/Sheets.
+ */
+function escapeCsvCell(value: unknown): string {
+  let text = String(value ?? '').replace(/[\r\n]+/g, ' ');
+
+  if (/^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
+
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 export class ClientService {
   async create(data: CreateClientInput) {
     // Check if phone already exists
@@ -114,6 +130,52 @@ export class ClientService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Exportação de clientes em CSV, gerada no servidor.
+   * Sem paginação: o arquivo contém todos os registros do tenant.
+   */
+  async exportCsv(): Promise<{ csv: string; count: number }> {
+    const clients = await prisma.client.findMany({
+      orderBy: { createdAt: 'asc' },
+      select: {
+        name: true,
+        phone: true,
+        email: true,
+        cpf: true,
+        loyaltyPoints: true,
+        isBlocked: true,
+        createdAt: true,
+      },
+    });
+
+    const header = 'Nome;Telefone;Email;CPF;Pontos;Bloqueado;Criado em';
+
+    // Timezone explícito: o servidor pode rodar em UTC e "virar o dia"
+    // errado para quem registrou o cliente à noite em São Paulo.
+    const createdAtFormatter = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+    });
+
+    const rows = clients.map((c) =>
+      [
+        c.name,
+        c.phone,
+        c.email ?? '',
+        c.cpf ?? '',
+        c.loyaltyPoints ?? 0,
+        c.isBlocked ? 'Sim' : 'Não',
+        createdAtFormatter.format(new Date(c.createdAt)),
+      ]
+        .map((value) => escapeCsvCell(value))
+        .join(';')
+    );
+
+    // BOM para o Excel reconhecer UTF-8
+    const csv = '\uFEFF' + [header, ...rows].join('\r\n');
+
+    return { csv, count: clients.length };
   }
 
   async findById(id: string) {

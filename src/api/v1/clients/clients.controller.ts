@@ -44,6 +44,22 @@ export const getClient = asyncHandler(
   }
 );
 
+/**
+ * Exportação de clientes em CSV (permissão clients.export).
+ * O arquivo é gerado no servidor — o cliente não monta o CSV.
+ */
+export const exportClients = asyncHandler(
+  async (_req: Request, res: Response) => {
+    const { csv, count } = await clientService.exportCsv();
+    const filename = `clientes-${new Date().toISOString().slice(0, 10)}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Total-Count', String(count));
+    res.send(csv);
+  }
+);
+
 export const updateClient = asyncHandler(
   async (req: Request, res: Response) => {
     const client = await clientService.update(req.params.id, req.body);

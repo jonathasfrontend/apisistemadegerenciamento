@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ProductsService } from './products.service';
 import { logger } from '../../../utils/logger';
+import { parseLimit } from '../../../utils/pagination';
 
 export class ProductsController {
   private productsService: ProductsService;
@@ -38,12 +39,19 @@ export class ProductsController {
    */
   list = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { category, isActive, lowStock } = req.query;
-      
+      const { category, isActive, lowStock, search, limit } = req.query;
+
       const filters: any = {};
       if (category) filters.category = category as string;
       if (isActive !== undefined) filters.isActive = isActive === 'true';
       if (lowStock === 'true') filters.lowStock = true;
+      if (search) filters.search = search as string;
+
+      // Limite opcional (1..100) para busca global. Parâmetro presente com
+      // valor inválido não pode cair no "sem limite" (tabela inteira).
+      if (limit !== undefined) {
+        filters.limit = parseLimit(limit);
+      }
 
       const products = await this.productsService.list(filters);
       

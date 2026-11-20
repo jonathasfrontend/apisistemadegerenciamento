@@ -83,7 +83,7 @@ Certifique-se de ter instalado:
 
 - **Node.js** >= 18.0.0 ([Download](https://nodejs.org/))
 - **npm** >= 9.0.0 (incluído com Node.js)
-- **PostgreSQL** >= 15 ([Download](https://www.postgresql.org/download/)) ou use [Supabase](https://supabase.com/)
+- **PostgreSQL** >= 15 ou use [Neon](https://neon.com/) (banco gerenciado usado no projeto)
 - **Redis** >= 7 ([Download](https://redis.io/download)) ou use [Upstash](https://upstash.com/)
 - **Git** ([Download](https://git-scm.com/))
 

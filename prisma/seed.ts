@@ -31,6 +31,7 @@ async function main() {
     prisma.permission.create({ data: { name: 'clients.create', description: 'Criar clientes', module: 'clients' } }),
     prisma.permission.create({ data: { name: 'clients.update', description: 'Editar clientes', module: 'clients' } }),
     prisma.permission.create({ data: { name: 'clients.delete', description: 'Deletar clientes', module: 'clients' } }),
+    prisma.permission.create({ data: { name: 'clients.export', description: 'Exportar dados de clientes (CSV)', module: 'clients' } }),
     
     // Appointments
     prisma.permission.create({ data: { name: 'appointments.read', description: 'Visualizar agendamentos', module: 'appointments' } }),
@@ -130,9 +131,9 @@ async function main() {
     },
   });
 
-  // Permissões para Recepção
-  const receptionPermissions = permissions.filter((p: any) => 
-    p.name.startsWith('clients.') || 
+  // Permissões para Recepção (clients.export fica fora: exportação em massa é restrita)
+  const receptionPermissions = permissions.filter((p: any) =>
+    (p.name.startsWith('clients.') && p.name !== 'clients.export') ||
     p.name.startsWith('appointments.') ||
     p.name === 'staff.read' ||
     p.name === 'services.read' ||

@@ -1,6 +1,7 @@
-import { PrismaClient, Review } from '@prisma/client';
+import { Review } from '@prisma/client';
+import { createPrismaClient } from '../../../config/db';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 interface CreateReviewDTO {
   clientId: string;

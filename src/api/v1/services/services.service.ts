@@ -1,6 +1,7 @@
-import { PrismaClient, Service } from '@prisma/client';
+import { Service } from '@prisma/client';
+import { createPrismaClient } from '../../../config/db';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 interface CreateServiceDTO {
   name: string;
@@ -24,6 +25,8 @@ interface UpdateServiceDTO {
 interface ServiceFilters {
   category?: string;
   isActive?: boolean;
+  search?: string;
+  limit?: number;
 }
 
 export class ServicesService {
@@ -57,12 +60,21 @@ export class ServicesService {
       where.isActive = filters.isActive;
     }
 
+    if (filters.search) {
+      where.OR = [
+        { name: { contains: filters.search, mode: 'insensitive' } },
+        { category: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
     return await prisma.service.findMany({
       where,
       orderBy: [
         { category: 'asc' },
         { name: 'asc' },
       ],
+      // Limite opcional: usado pela busca global para não puxar a tabela inteira
+      ...(filters.limit ? { take: filters.limit } : {}),
     });
   }
 

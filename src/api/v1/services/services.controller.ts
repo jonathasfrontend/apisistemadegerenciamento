@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ServicesService } from './services.service';
 import { logger } from '../../../utils/logger';
+import { parseLimit } from '../../../utils/pagination';
 
 export class ServicesController {
   private servicesService: ServicesService;
@@ -38,11 +39,18 @@ export class ServicesController {
    */
   list = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { category, isActive } = req.query;
-      
+      const { category, isActive, search, limit } = req.query;
+
       const filters: any = {};
       if (category) filters.category = category as string;
       if (isActive !== undefined) filters.isActive = isActive === 'true';
+      if (search) filters.search = search as string;
+
+      // Limite opcional (1..100) para busca global. Parâmetro presente com
+      // valor inválido não pode cair no "sem limite" (tabela inteira).
+      if (limit !== undefined) {
+        filters.limit = parseLimit(limit);
+      }
 
       const services = await this.servicesService.list(filters);
       

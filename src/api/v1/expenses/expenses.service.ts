@@ -1,6 +1,7 @@
-import { PrismaClient, Expense } from '@prisma/client';
+import { Expense } from '@prisma/client';
+import { createPrismaClient } from '../../../config/db';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 interface CreateExpenseDTO {
   description: string;

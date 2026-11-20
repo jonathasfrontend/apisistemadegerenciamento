@@ -15,6 +15,9 @@ const createStaffSchema = z.object({
     commissionValue: z.number().min(0).optional(),
     workSchedule: z.any().optional(),
     blockedDates: z.any().optional(),
+    // Disponibilidade já pode ser definida na criação (o formulário envia).
+    // Sem isso o Zod descarta o campo e o profissional nasce disponível (default true).
+    isAvailable: z.boolean().optional(),
   }),
 });
 

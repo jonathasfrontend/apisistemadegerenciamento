@@ -1,8 +1,11 @@
-import { PrismaClient, User } from '@prisma/client';
+import { NotificationType, User } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { AppError } from '../../../middlewares/error.handler';
 
-const prisma = new PrismaClient();
+import { createPrismaClient } from '../../../config/db';
+import { notifyResource } from '../notifications/notifications.service';
+
+const prisma = createPrismaClient();
 
 interface CreateUserDTO {
   email: string;
@@ -66,6 +69,17 @@ export class UsersService {
         },
       },
     });
+
+    // Avisar os Admins (best-effort: nunca derruba a criação do usuário)
+    await notifyResource(
+      {
+        type: NotificationType.NEW_USER,
+        message: `Novo usuário cadastrado: ${user.name} (${user.email})`,
+        link: '/staff',
+        dedupeKey: `NEW_USER:${user.id}`,
+      },
+      { roleNames: ['Admin'] }
+    );
 
     // Remover passwordHash do retorno
     const { passwordHash: _, ...userWithoutPassword } = user;

@@ -1,6 +1,9 @@
-import { PrismaClient, Payment, PaymentStatus, PaymentMethod } from '@prisma/client';
+import { NotificationType, Payment, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { createPrismaClient } from '../../../config/db';
+import { notifyResource } from '../notifications/notifications.service';
+import { paymentPaidMessage } from './payment-messages';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 interface CreatePaymentDTO {
   appointmentId?: string;
@@ -154,7 +157,11 @@ export class PaymentsService {
         paidAt: new Date(),
       },
       include: {
-        appointment: true,
+        appointment: {
+          include: {
+            client: true,
+          },
+        },
       },
     });
 
@@ -188,6 +195,24 @@ export class PaymentsService {
           },
         });
       }
+    }
+
+    // Avisar Admin + Recepção que o pagamento foi confirmado (best-effort).
+    // Pagamento sem agendamento não gera aviso — não há recurso para linkar.
+    if (payment.appointmentId && payment.appointment) {
+      await notifyResource(
+        {
+          type: NotificationType.PAYMENT_PAID,
+          message: paymentPaidMessage(
+            payment.appointment.client.name,
+            payment.appointment.startTime
+          ),
+          appointmentId: payment.appointmentId,
+          link: `/appointments/${payment.appointmentId}`,
+          dedupeKey: `PAYMENT_PAID:${payment.appointmentId}`,
+        },
+        { roleNames: ['Admin', 'Recepção'] }
+      );
     }
 
     return payment;

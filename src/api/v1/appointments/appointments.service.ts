@@ -1,5 +1,20 @@
 import prisma from '../../../config/db';
 import { AppError } from '../../../middlewares/error.handler';
+import { notifyResource, notifyRoles } from '../notifications/notifications.service';
+import { NotificationType, AppointmentStatus } from '@prisma/client';
+import { formatDateTime } from '../../../utils/format';
+import {
+  paymentPaidMessage,
+  paymentPendingMessage,
+} from '../payments/payment-messages';
+import { scheduleAppointmentStart } from '../../../jobs/appointment-start';
+
+/**
+ * Status a partir dos quais cancelamento/falta ainda fazem sentido.
+ * Fora daqui a transição é recusada (400): um appointment já CANCELLED ou
+ * NO_SHOW não pode virar o outro, e COMPLETED é histórico.
+ */
+const ACTIVE_STATUSES: AppointmentStatus[] = ['SCHEDULED', 'CONFIRMED'];
 
 type AppointmentWhereInput = {
   staffId?: string;
@@ -128,6 +143,22 @@ export class AppointmentService {
           },
         },
       });
+    });
+
+    // Notificação in-app (best-effort — notifyRoles nunca propaga erro)
+    await notifyRoles(['Admin', 'Recepção'], {
+      type: NotificationType.CONFIRMATION,
+      message: `Novo agendamento: ${client.name} em ${formatDateTime(appointment.startTime)}`,
+      appointmentId: appointment.id,
+      link: `/appointments/${appointment.id}`,
+    });
+
+    // Aviso "começando agora" no horário exato (BullMQ + reconciliador)
+    await scheduleAppointmentStart({
+      id: appointment.id,
+      startTime: appointment.startTime,
+      client: { name: client.name },
+      staff: { userId: appointment.staff.userId },
     });
 
     return appointment;
@@ -315,7 +346,21 @@ export class AppointmentService {
             },
           },
         });
-        
+
+        if (data.status === 'COMPLETED') {
+          await this.notifyPaymentState(updated);
+        }
+
+        if (data.startTime) {
+          // Remarcação: reagenda o aviso de horário (novo dedupeKey)
+          await scheduleAppointmentStart({
+            id: updated.id,
+            startTime: updated.startTime,
+            client: { name: updated.client.name },
+            staff: { userId: updated.staff.userId },
+          });
+        }
+
         return updated;
       }
     }
@@ -337,7 +382,40 @@ export class AppointmentService {
       },
     });
 
+    if (data.status === 'COMPLETED') {
+      await this.notifyPaymentState(updated);
+    }
+
     return updated;
+  }
+
+  /**
+   * Avisa Admin + Recepção sobre a situação do pagamento quando o agendamento
+   * é concluído: `PAYMENT_PENDING` (sem pagamento) ou `PAYMENT_PAID` (pago).
+   * Best-effort — nunca derruba a atualização do agendamento.
+   */
+  private async notifyPaymentState(appointment: {
+    id: string;
+    startTime: Date;
+    isPaid: boolean;
+    client: { name: string };
+    payments?: Array<{ status: string }>;
+  }): Promise<void> {
+    const paid =
+      appointment.isPaid || (appointment.payments ?? []).some((p) => p.status === 'PAID');
+
+    await notifyResource(
+      {
+        type: paid ? NotificationType.PAYMENT_PAID : NotificationType.PAYMENT_PENDING,
+        message: paid
+          ? paymentPaidMessage(appointment.client.name, appointment.startTime)
+          : paymentPendingMessage(appointment.client.name, appointment.startTime),
+        appointmentId: appointment.id,
+        link: `/appointments/${appointment.id}`,
+        dedupeKey: `${paid ? 'PAYMENT_PAID' : 'PAYMENT_PENDING'}:${appointment.id}`,
+      },
+      { roleNames: ['Admin', 'Recepção'] }
+    );
   }
 
   async cancel(id: string) {
@@ -350,12 +428,37 @@ export class AppointmentService {
       throw new AppError('Appointment not found', 404);
     }
 
+    // Cancelar duas vezes geraria notificação duplicada e re-cancelaria pagamentos
+    if (appointment.status === 'CANCELLED') {
+      throw new AppError('Appointment is already cancelled', 400);
+    }
+
     // Use transaction to update both appointment and payment
     const result = await prisma.$transaction(async (tx : any) => {
-      // Update appointment status
-      const updatedAppointment = await tx.appointment.update({
-        where: { id },
+      // Update condicional: só o primeiro cancelamento vence. O filtro de
+      // status ATIVO impede que um appointment já CANCELLED ou NO_SHOW seja
+      // cancelado (e vice-versa) — os dois efeitos não podem coexistir.
+      const claimed = await tx.appointment.updateMany({
+        where: { id, status: { in: ACTIVE_STATUSES } },
         data: { status: 'CANCELLED' },
+      });
+
+      if (claimed.count === 0) {
+        // Perdemos a corrida ou o status não permite cancelamento
+        const current = await tx.appointment.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        throw new AppError(
+          current?.status === 'CANCELLED'
+            ? 'Appointment is already cancelled'
+            : `Appointment cannot be cancelled in status ${current?.status ?? 'UNKNOWN'}`,
+          400
+        );
+      }
+
+      const updatedAppointment = await tx.appointment.findUnique({
+        where: { id },
         include: {
           client: true,
           staff: {
@@ -371,17 +474,23 @@ export class AppointmentService {
       });
 
       // Cancel pending payments
-      if (appointment.payments && appointment.payments.length > 0) {
-        await tx.payment.updateMany({
-          where: {
-            appointmentId: id,
-            status: { in: ['PENDING', 'PARTIAL'] },
-          },
-          data: { status: 'CANCELLED' },
-        });
-      }
+      await tx.payment.updateMany({
+        where: {
+          appointmentId: id,
+          status: { in: ['PENDING', 'PARTIAL'] },
+        },
+        data: { status: 'CANCELLED' },
+      });
 
       return updatedAppointment;
+    });
+
+    // Notificação in-app de cancelamento (best-effort)
+    await notifyRoles(['Admin', 'Recepção'], {
+      type: NotificationType.CANCELLATION,
+      message: `Agendamento cancelado: ${result.client.name} em ${formatDateTime(result.startTime)}`,
+      appointmentId: result.id,
+      link: `/appointments/${result.id}`,
     });
 
     return result;
@@ -397,29 +506,70 @@ export class AppointmentService {
       throw new AppError('Appointment not found', 404);
     }
 
-    // Update appointment status
-    const updated = await prisma.appointment.update({
-      where: { id },
-      data: { status: 'NO_SHOW' },
-    });
-
-    // Increment client no-show count
-    await prisma.client.update({
-      where: { id: appointment.clientId },
-      data: {
-        noShowCount: {
-          increment: 1,
-        },
-      },
-    });
-
-    // Auto-block if >= 3 no-shows
-    if (appointment.client.noShowCount + 1 >= 3) {
-      await prisma.client.update({
-        where: { id: appointment.clientId },
-        data: { isBlocked: true },
-      });
+    // Marcar falta duas vezes contaria a mesma ausência duas vezes
+    if (appointment.status === 'NO_SHOW') {
+      throw new AppError('Appointment is already marked as no-show', 400);
     }
+
+    // Status + contador + bloqueio em UMA transação:
+    // o bloqueio deriva do contador já atualizado (snapshot obsoleto causava
+    // contagem dupla em chamadas concorrentes).
+    const updated = await prisma.$transaction(async (tx: any) => {
+      // Update condicional: só o primeiro no-show vence. O incremento do
+      // contador acontece DEPOIS e apenas para quem reivindicou a transição.
+      // Filtra por status ATIVO: appointment CANCELLED/COMPLETED não vira falta.
+      const claimed = await tx.appointment.updateMany({
+        where: { id, status: { in: ACTIVE_STATUSES } },
+        data: { status: 'NO_SHOW' },
+      });
+
+      if (claimed.count === 0) {
+        // Perdemos a corrida ou o status não permite falta
+        const current = await tx.appointment.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        throw new AppError(
+          current?.status === 'NO_SHOW'
+            ? 'Appointment is already marked as no-show'
+            : `Appointment cannot be marked as no-show in status ${current?.status ?? 'UNKNOWN'}`,
+          400
+        );
+      }
+
+      const updatedAppointment = await tx.appointment.findUnique({
+        where: { id },
+        include: { client: true },
+      });
+
+      const client = await tx.client.update({
+        where: { id: appointment.clientId },
+        data: {
+          noShowCount: {
+            increment: 1,
+          },
+        },
+        select: { noShowCount: true, isBlocked: true },
+      });
+
+      // Auto-block if >= 3 no-shows (usa o contador já incrementado)
+      if (client.noShowCount >= 3 && !client.isBlocked) {
+        await tx.client.update({
+          where: { id: appointment.clientId },
+          data: { isBlocked: true },
+        });
+      }
+
+      return updatedAppointment;
+    });
+
+    // Notificação in-app de falta (best-effort)
+    await notifyRoles(['Admin', 'Recepção'], {
+      type: NotificationType.NO_SHOW,
+      message: `Falta registrada: ${appointment.client.name} em ${formatDateTime(appointment.startTime)}`,
+      appointmentId: appointment.id,
+      link: `/appointments/${appointment.id}`,
+    });
 
     return updated;
   }

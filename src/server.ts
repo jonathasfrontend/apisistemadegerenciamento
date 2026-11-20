@@ -13,6 +13,19 @@ const startServer = async () => {
     await prisma.$connect();
     logger.info('✓ Database connected successfully');
 
+    // Fila de notificações (BullMQ) + reconciliador de horário.
+    // Import dinâmico + try/catch: Redis fora do ar NÃO pode derrubar a API.
+    let notificationWorker: { close: () => Promise<void> } | undefined;
+    try {
+      const { notificationWorker: worker } = await import('./jobs/notification.worker');
+      const { startAppointmentStartReconciler } = await import('./jobs/appointment-start');
+      notificationWorker = worker;
+      startAppointmentStartReconciler();
+      logger.info('✓ Reconciliador de agendamento iniciado');
+    } catch (error: any) {
+      logger.warn('Fila de notificações indisponível (Redis):', error?.message);
+    }
+
     // Start server
     const server = app.listen(env.port, () => {
       logger.info(`🚀 Server running on port ${env.port}`);
@@ -23,10 +36,15 @@ const startServer = async () => {
     // Graceful shutdown
     const gracefulShutdown = async (signal: string) => {
       logger.info(`${signal} received. Starting graceful shutdown...`);
-      
+
       server.close(async () => {
         logger.info('HTTP server closed');
-        
+
+        if (notificationWorker) {
+          await notificationWorker.close().catch(() => undefined);
+          logger.info('Notification worker closed');
+        }
+
         await prisma.$disconnect();
         logger.info('Database disconnected');
         
