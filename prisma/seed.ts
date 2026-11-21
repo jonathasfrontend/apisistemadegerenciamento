@@ -107,6 +107,11 @@ async function main() {
     prisma.permission.create({ data: { name: 'roles.delete', description: 'Deletar cargos', module: 'roles' } }),
     prisma.permission.create({ data: { name: 'roles.assign', description: 'Atribuir cargos', module: 'roles' } }),
     
+    // Companies (0B.2) — Admin recebe todas; Recepção/Profissional não
+    prisma.permission.create({ data: { name: 'companies.read', description: 'Visualizar empresas', module: 'companies' } }),
+    prisma.permission.create({ data: { name: 'companies.create', description: 'Criar empresas', module: 'companies' } }),
+    prisma.permission.create({ data: { name: 'companies.update', description: 'Editar empresas', module: 'companies' } }),
+
     // Reviews
     prisma.permission.create({ data: { name: 'reviews.read', description: 'Visualizar avaliações', module: 'reviews' } }),
     

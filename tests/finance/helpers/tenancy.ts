@@ -57,7 +57,8 @@ const TEST_PERMISSIONS = [
   'staff.read', 'staff.create', 'staff.update', 'staff.delete',
   'appointments.read', 'appointments.create', 'appointments.update', 'appointments.delete',
   'reviews.read', 'waitlist.read', 'waitlist.create',
-  'reports.read', 'users.list', 'users.read', 'roles.read', 'roles.assign',
+  'reports.read', 'users.list', 'users.read', 'users.create', 'roles.read', 'roles.assign',
+  'companies.read', 'companies.create', 'companies.update',
 ];
 
 export async function seedTwoTenants(): Promise<TenantFixture> {

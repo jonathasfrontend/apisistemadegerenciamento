@@ -169,106 +169,18 @@ export class AuthService {
     logger.info('User logged out successfully');
   }
 
-  async register(input: {
+  async register(_input: {
     email: string;
     password: string;
     name: string;
     roleId?: string;
   }): Promise<AuthResponse> {
-    const { email, password, name, roleId } = input;
-
-    // Check if user exists
-    const existingUser = await prisma.user.findFirst({
-      where: { email: email.toLowerCase() },
-    });
-
-    if (existingUser) {
-      throw new AppError('Email already registered', 400);
-    }
-
-    // Se roleId não for fornecido, buscar role "Recepção" como padrão
-    let finalRoleId = roleId;
-    if (!finalRoleId) {
-      const defaultRole: any = await (prisma as any).role.findUnique({
-        where: { name: 'Recepção' },
-      });
-      
-      if (!defaultRole) {
-        throw new AppError('Default role not found', 500);
-      }
-      
-      finalRoleId = defaultRole.id;
-    }
-
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    // Registro é rota pública: vincular à única empresa ativa.
-    // Multiempresa em registro não existe — ver AUDIT §13 (adaptação F0.2).
-    const companies: any[] = await (prisma as any).company.findMany({
-      where: { isActive: true },
-      select: { id: true },
-    });
-    if (companies.length === 0) {
-      throw new AppError('No company provisioned', 500);
-    }
-    if (companies.length > 1) {
-      throw new AppError('Multiple companies provisioned; explicit registration flow required', 400);
-    }
-    const company = companies[0];
-
-    // Create user
-    const user: any = await prisma.user.create({
-      data: {
-        email: email.toLowerCase(),
-        passwordHash,
-        name,
-        roleId: finalRoleId,
-        companyId: company.id,
-      } as any,
-      include: {
-        role: {
-          include: {
-            rolePermissions: {
-              include: {
-                permission: true,
-              },
-            },
-          },
-        },
-      } as any,
-    });
-
-    if (!user.role) {
-      throw new AppError('User role not found', 500);
-    }
-
-    // Extract permissions
-    const permissions = user.role.rolePermissions.map((rp: any) => rp.permission.name);
-
-    // Generate tokens
-    const accessToken = this.generateAccessToken({
-      sub: user.id,
-      role: user.role.name,
-      permissions,
-      companyId: user.companyId,
-    });
-
-    const refreshToken = await this.generateRefreshToken(user.id, user.companyId);
-
-    logger.info(`New user registered: ${user.email}`);
-
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role.name,
-        permissions,
-      },
-      accessToken,
-      refreshToken,
-    };
+    // 0B.2 (D-0B.1): cadastro público desativado. Usuários novos só via
+    // POST /users pelo Admin, com companyId do req.user recarregado do DB.
+    // Lança antes de qualquer leitura/escrita: nenhum usuário é criado e
+    // nenhuma empresa é exposta ao chamador. Envelope de erro mantido pelo
+    // errorHandler ({status:'error', message}).
+    throw new AppError('Cadastro desativado. Solicite ao administrador.', 403);
   }
 
   private generateAccessToken(payload: { sub: string; role: string; permissions: string[]; companyId: string }): string {
