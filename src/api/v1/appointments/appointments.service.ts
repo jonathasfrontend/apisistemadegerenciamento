@@ -57,7 +57,7 @@ interface UpdateAppointmentInput {
 }
 
 export class AppointmentService {
-  async create(data: CreateAppointmentInput, createdBy: string) {
+  async create(data: CreateAppointmentInput, createdBy: string, companyId: string) {
     // Validate client exists
     const client = await prisma.client.findUnique({
       where: { id: data.clientId },
@@ -114,9 +114,12 @@ export class AppointmentService {
         },
       });
 
-      // Create the payment automatically with PENDING status
+      // Create the payment automatically with PENDING status.
+      // companyId vem do contexto autenticado (req.user), nunca do body —
+      // payments.companyId é NOT NULL desde a migration F0.
       await tx.payment.create({
         data: {
+          companyId,
           appointmentId: newAppointment.id,
           clientId: data.clientId,
           amount: totalAmount,

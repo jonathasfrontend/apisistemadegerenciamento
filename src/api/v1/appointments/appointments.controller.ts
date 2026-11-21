@@ -6,7 +6,11 @@ const appointmentService = new AppointmentService();
 
 export const createAppointment = asyncHandler(
   async (req: Request, res: Response) => {
-    const appointment = await appointmentService.create(req.body, req.user!.id);
+    const appointment = await appointmentService.create(
+      req.body,
+      req.user!.id,
+      req.user!.companyId
+    );
 
     res.status(201).json({
       status: 'success',
