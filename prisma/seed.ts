@@ -110,6 +110,26 @@ async function main() {
     // Waitlist
     prisma.permission.create({ data: { name: 'waitlist.read', description: 'Visualizar lista de espera', module: 'waitlist' } }),
     prisma.permission.create({ data: { name: 'waitlist.create', description: 'Criar itens na lista de espera', module: 'waitlist' } }),
+
+    // Finance (F0.3) — 18 permissões
+    prisma.permission.create({ data: { name: 'finance.dashboard', description: 'Visualizar painel financeiro', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.settings', description: 'Configurar parâmetros financeiros', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.catalog.manage', description: 'Gerenciar catálogo financeiro (categorias e contas)', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.cash.operate', description: 'Operar caixa (abertura, movimentação e fechamento)', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.cash.view-all', description: 'Visualizar todos os turnos de caixa', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.cash.reopen', description: 'Reabrir caixa fechado', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.payables.list', description: 'Visualizar contas a pagar', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.payables.create', description: 'Criar contas a pagar', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.payables.update', description: 'Editar contas a pagar', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.payables.pay', description: 'Registrar pagamento de contas a pagar', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.payables.delete', description: 'Excluir contas a pagar', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.receivables.list', description: 'Visualizar contas a receber', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.bank.import', description: 'Importar extratos bancários (OFX)', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.bank.view', description: 'Visualizar transações bancárias', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.reconcile', description: 'Conciliar transações bancárias', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.rules.manage', description: 'Gerenciar regras de conciliação', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.cards.manage', description: 'Gerenciar faturas de cartão', module: 'finance' } }),
+    prisma.permission.create({ data: { name: 'finance.reports', description: 'Visualizar relatórios financeiros', module: 'finance' } }),
   ]);
 
   console.log(`✅ Created ${permissions.length} permissions`);
@@ -153,7 +173,8 @@ async function main() {
     p.name === 'staff.read' ||
     p.name === 'services.read' ||
     p.name === 'waitlist.read' ||
-    p.name === 'waitlist.create'
+    p.name === 'waitlist.create' ||
+    p.name === 'finance.cash.operate'
   );
 
   for (const permission of receptionPermissions) {
