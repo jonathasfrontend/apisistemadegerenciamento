@@ -25,7 +25,12 @@ async function main(): Promise<void> {
   const token = login.body?.data?.accessToken;
   if (!token) throw new Error('accessToken ausente');
 
-  const routes = ['/api/v1/payments', '/api/v1/expenses', '/api/v1/reports/dashboard'];
+  const routes = [
+    '/api/v1/payments',
+    '/api/v1/expenses',
+    '/api/v1/reports/dashboard',
+    '/api/v1/reports/financial/revenue',
+  ];
   let failed = false;
 
   for (const route of routes) {
