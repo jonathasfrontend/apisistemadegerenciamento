@@ -94,17 +94,31 @@ model Company {
   updatedAt DateTime @updatedAt
 
   // Relations
-  users    User[]
-  payments Payment[]
-  expenses Expense[]
-  sales    Sale[]
+  users          User[]
+  payments       Payment[]
+  expenses       Expense[]
+  sales          Sale[]
+  // 0B.1: relações inversas dos modelos que passam a ser tenant-scoped.
+  refreshTokens  RefreshToken[]
+  staff          Staff[]
+  clients        Client[]
+  services       Service[]
+  appointments   Appointment[]
+  commissions    Commission[]
+  products       Product[]
+  stockMovements StockMovement[]
+  saleItems      SaleItem[]
+  notifications  Notification[]
+  reviews        Review[]
+  auditLogs      AuditLog[]
+  waitlist       Waitlist[]
 
   @@map("companies")
 }
 
 model User {
   id           String    @id @default(uuid())
-  email        String    @unique
+  email        String // 0B.1: unique composto [companyId, email] abaixo (D-0B.3)
   passwordHash String    @map("password_hash")
   name         String
   roleId       String?   @map("role_id")
@@ -126,6 +140,7 @@ model User {
   createdAppointments Appointment[]  @relation("CreatedBy")
   notifications       Notification[]
 
+  @@unique([companyId, email])
   @@index([roleId])
   @@index([companyId])
   @@map("users")
@@ -186,15 +201,18 @@ model RolePermission {
 
 model RefreshToken {
   id        String   @id @default(uuid())
+  companyId String // 0B.1: tenant-scoped
   userId    String   @map("user_id")
   tokenHash String   @unique @map("token_hash")
   revoked   Boolean  @default(false)
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
 
   @@index([userId])
+  @@index([companyId])
   @@index([tokenHash])
   @@map("refresh_tokens")
 }
@@ -212,16 +230,19 @@ model Staff {
   workSchedule    Json?          @map("work_schedule") // { "monday": { "start": "09:00", "end": "18:00" }, ... }
   blockedDates    Json?          @map("blocked_dates") // [{ "start": "2024-12-25", "end": "2024-12-26", "reason": "férias" }]
   isAvailable     Boolean        @default(true) @map("is_available")
+  companyId       String // 0B.1: tenant-scoped
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company      Company       @relation(fields: [companyId], references: [id])
   appointments Appointment[]
   commissions  Commission[]
 
   @@index([userId])
+  @@index([companyId])
   @@map("staff")
 }
 
@@ -231,11 +252,12 @@ model Staff {
 
 model Client {
   id            String    @id @default(uuid())
+  companyId     String // 0B.1: tenant-scoped
   name          String
-  phone         String    @unique
+  phone         String // 0B.1: unique composto [companyId, phone] (D-0B.3)
   email         String?
   birthdate     DateTime?
-  cpf           String?   @unique
+  cpf           String? // 0B.1: unique composto [companyId, cpf] (D-0B.3)
   notes         String?   @db.Text
   preferences   Json? // { "preferredStaff": "uuid", "allergies": ["látex"], "favoriteColor": "#FF0000" }
   loyaltyPoints Int       @default(0) @map("loyalty_points")
@@ -248,11 +270,15 @@ model Client {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
+  company      Company       @relation(fields: [companyId], references: [id])
   appointments Appointment[]
   payments     Payment[]
   sales        Sale[]
   reviews      Review[]
 
+  @@unique([companyId, phone])
+  @@unique([companyId, cpf])
+  @@index([companyId])
   @@index([phone])
   @@index([email])
   @@map("clients")
@@ -264,6 +290,7 @@ model Client {
 
 model Service {
   id              String  @id @default(uuid())
+  companyId       String // 0B.1: tenant-scoped
   name            String
   description     String? @db.Text
   durationMinutes Int     @map("duration_minutes")
@@ -275,6 +302,9 @@ model Service {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@index([category])
   @@map("services")
 }
@@ -285,6 +315,7 @@ model Service {
 
 model Appointment {
   id          String            @id @default(uuid())
+  companyId   String // 0B.1: tenant-scoped
   clientId    String            @map("client_id")
   staffId     String            @map("staff_id")
   startTime   DateTime          @map("start_time")
@@ -303,9 +334,12 @@ model Appointment {
   client        Client         @relation(fields: [clientId], references: [id])
   staff         Staff          @relation(fields: [staffId], references: [id])
   creator       User           @relation("CreatedBy", fields: [createdBy], references: [id])
+  company       Company        @relation(fields: [companyId], references: [id])
   payments      Payment[]
   notifications Notification[]
 
+  @@index([companyId])
+  @@index([companyId, createdAt])
   @@index([startTime])
   @@index([staffId, startTime])
   @@index([clientId])
@@ -347,6 +381,7 @@ model Payment {
 
 model Commission {
   id        String    @id @default(uuid())
+  companyId String // 0B.1: tenant-scoped
   paymentId String    @map("payment_id")
   staffId   String    @map("staff_id")
   amount    Float
@@ -358,7 +393,9 @@ model Commission {
   // Relations
   payment Payment @relation(fields: [paymentId], references: [id])
   staff   Staff   @relation(fields: [staffId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 
+  @@index([companyId])
   @@index([staffId])
   @@index([paymentId])
   @@map("commissions")
@@ -393,7 +430,8 @@ model Expense {
 
 model Product {
   id               String  @id @default(uuid())
-  sku              String  @unique
+  companyId        String // 0B.1: tenant-scoped
+  sku              String // 0B.1: unique composto [companyId, sku] (D-0B.3)
   name             String
   description      String? @db.Text
   category         String
@@ -408,9 +446,12 @@ model Product {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
+  company        Company         @relation(fields: [companyId], references: [id])
   stockMovements StockMovement[]
   saleItems      SaleItem[]
 
+  @@unique([companyId, sku])
+  @@index([companyId])
   @@index([sku])
   @@index([category])
   @@map("products")
@@ -418,6 +459,7 @@ model Product {
 
 model StockMovement {
   id        String  @id @default(uuid())
+  companyId String // 0B.1: tenant-scoped
   productId String  @map("product_id")
   type      String // "IN" | "OUT" | "ADJUSTMENT"
   quantity  Int
@@ -427,7 +469,9 @@ model StockMovement {
   createdAt DateTime @default(now()) @map("created_at")
 
   product Product @relation(fields: [productId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 
+  @@index([companyId])
   @@index([productId])
   @@map("stock_movements")
 }
@@ -458,6 +502,7 @@ model Sale {
 
 model SaleItem {
   id        String @id @default(uuid())
+  companyId String // 0B.1: tenant-scoped
   saleId    String @map("sale_id")
   productId String @map("product_id")
   quantity  Int
@@ -466,7 +511,9 @@ model SaleItem {
 
   sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 
+  @@index([companyId])
   @@index([saleId])
   @@index([productId])
   @@map("sale_items")
@@ -478,6 +525,7 @@ model SaleItem {
 
 model Notification {
   id            String              @id @default(uuid())
+  companyId     String // 0B.1: tenant-scoped
   userId        String?             @map("user_id")
   appointmentId String?             @map("appointment_id")
   // Rota interna para onde o clique na notificação leva (/appointments/{id}, ...)
@@ -500,8 +548,11 @@ model Notification {
 
   user        User?        @relation(fields: [userId], references: [id])
   appointment Appointment? @relation(fields: [appointmentId], references: [id])
+  company     Company      @relation(fields: [companyId], references: [id])
 
   @@unique([userId, dedupeKey])
+  @@index([companyId])
+  @@index([companyId, createdAt])
   @@index([userId])
   @@index([appointmentId])
   @@index([status])
@@ -515,6 +566,7 @@ model Notification {
 
 model Review {
   id             String  @id @default(uuid())
+  companyId      String // 0B.1: tenant-scoped
   clientId       String  @map("client_id")
   rating         Int // 1-5
   comment        String? @db.Text
@@ -524,8 +576,10 @@ model Review {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  client Client @relation(fields: [clientId], references: [id])
+  client  Client  @relation(fields: [clientId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 
+  @@index([companyId])
   @@index([clientId])
   @@map("reviews")
 }
@@ -536,6 +590,7 @@ model Review {
 
 model AuditLog {
   id        String  @id @default(uuid())
+  companyId String // 0B.1: tenant-scoped
   userId    String? @map("user_id")
   action    String // "CREATE", "UPDATE", "DELETE", "LOGIN", "LOGOUT"
   entity    String // "appointment", "payment", "user"
@@ -545,8 +600,11 @@ model AuditLog {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  user User? @relation(fields: [userId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 
+  @@index([companyId])
+  @@index([companyId, createdAt])
   @@index([userId])
   @@index([entity, entityId])
   @@index([createdAt])
@@ -559,6 +617,7 @@ model AuditLog {
 
 model Waitlist {
   id            String    @id @default(uuid())
+  companyId     String // 0B.1: tenant-scoped
   clientName    String    @map("client_name")
   clientPhone   String    @map("client_phone")
   serviceId     String    @map("service_id")
@@ -568,6 +627,9 @@ model Waitlist {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@index([isContacted])
   @@map("waitlist")
 }
