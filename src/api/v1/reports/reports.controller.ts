@@ -103,7 +103,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getMostProfitableServices(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -158,7 +159,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getAppointmentsStats(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -183,7 +185,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getOccupancyRate(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -212,7 +215,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getTopSellingProducts(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -225,9 +229,9 @@ export class ReportsController {
    * GET /api/v1/reports/products/low-stock
    * Produtos com estoque baixo
    */
-  lowStockProducts = async (_req: Request, res: Response): Promise<void> => {
+  lowStockProducts = async (req: Request, res: Response): Promise<void> => {
     try {
-      const report = await this.reportsService.getLowStockProducts();
+      const report = await this.reportsService.getLowStockProducts(req.user!.companyId);
       res.json({ status: 'success', data: report });
     } catch (error: any) {
       logger.error('Error generating low stock report:', error);
@@ -251,7 +255,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getStockMovementAnalysis(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -298,7 +303,7 @@ export class ReportsController {
     try {
       const { daysInactive } = req.query;
       const days = daysInactive ? parseInt(daysInactive as string) : 60;
-      const report = await this.reportsService.getInactiveClients(days);
+      const report = await this.reportsService.getInactiveClients(days, req.user!.companyId);
       res.json({ status: 'success', data: report });
     } catch (error: any) {
       logger.error('Error generating inactive clients report:', error);
@@ -310,9 +315,9 @@ export class ReportsController {
    * GET /api/v1/reports/clients/loyalty
    * Análise de programa de fidelidade
    */
-  loyaltyAnalysis = async (_req: Request, res: Response): Promise<void> => {
+  loyaltyAnalysis = async (req: Request, res: Response): Promise<void> => {
     try {
-      const report = await this.reportsService.getLoyaltyAnalysis();
+      const report = await this.reportsService.getLoyaltyAnalysis(req.user!.companyId);
       res.json({ status: 'success', data: report });
     } catch (error: any) {
       logger.error('Error generating loyalty analysis:', error);
@@ -332,6 +337,7 @@ export class ReportsController {
     try {
       const { staffId, startDate, endDate } = req.query;
       const report = await this.reportsService.getCommissions(
+        req.user!.companyId,
         staffId as string,
         startDate ? new Date(startDate as string) : undefined,
         endDate ? new Date(endDate as string) : undefined
@@ -408,7 +414,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getAppointmentsStats(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportAppointmentsStatsToExcel(data, res);
     } catch (error: any) {
@@ -433,7 +440,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getTopSellingProducts(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportProductsReportToExcel(data, 'top-selling', res);
     } catch (error: any) {
@@ -446,9 +454,9 @@ export class ReportsController {
    * GET /api/v1/reports/download/products/low-stock/excel
    * Download dos produtos com estoque baixo em Excel
    */
-  downloadLowStockProductsExcel = async (_req: Request, res: Response): Promise<void> => {
+  downloadLowStockProductsExcel = async (req: Request, res: Response): Promise<void> => {
     try {
-      const data = await this.reportsService.getLowStockProducts();
+      const data = await this.reportsService.getLowStockProducts(req.user!.companyId);
       await this.exportService.exportProductsReportToExcel(data, 'low-stock', res);
     } catch (error: any) {
       logger.error('Error downloading low stock products Excel:', error);
@@ -490,7 +498,7 @@ export class ReportsController {
     try {
       const { daysInactive } = req.query;
       const days = daysInactive ? parseInt(daysInactive as string) : 60;
-      const data = await this.reportsService.getInactiveClients(days);
+      const data = await this.reportsService.getInactiveClients(days, req.user!.companyId);
       await this.exportService.exportClientsReportToExcel(data, 'inactive', res);
     } catch (error: any) {
       logger.error('Error downloading inactive clients Excel:', error);
@@ -502,9 +510,9 @@ export class ReportsController {
    * GET /api/v1/reports/download/clients/loyalty/excel
    * Download da análise de fidelidade em Excel
    */
-  downloadLoyaltyAnalysisExcel = async (_req: Request, res: Response): Promise<void> => {
+  downloadLoyaltyAnalysisExcel = async (req: Request, res: Response): Promise<void> => {
     try {
-      const data = await this.reportsService.getLoyaltyAnalysis();
+      const data = await this.reportsService.getLoyaltyAnalysis(req.user!.companyId);
       await this.exportService.exportClientsReportToExcel(data, 'loyalty', res);
     } catch (error: any) {
       logger.error('Error downloading loyalty analysis Excel:', error);
@@ -577,7 +585,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getAppointmentsStats(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportGenericReportToPDF('📅 ESTATÍSTICAS DE AGENDAMENTOS', data, res);
     } catch (error: any) {
@@ -602,7 +611,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getTopSellingProducts(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportGenericReportToPDF('🏆 PRODUTOS MAIS VENDIDOS', data, res);
     } catch (error: any) {

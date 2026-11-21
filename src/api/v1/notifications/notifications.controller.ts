@@ -23,6 +23,7 @@ export const getNotifications = asyncHandler(
 
     const result = await notificationsService.list(
       req.user!.id,
+      req.user!.companyId,
       page,
       limit
     );
@@ -36,7 +37,7 @@ export const getNotifications = asyncHandler(
 
 export const getUnreadCount = asyncHandler(
   async (req: Request, res: Response) => {
-    const count = await notificationsService.unreadCount(req.user!.id);
+    const count = await notificationsService.unreadCount(req.user!.id, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -50,7 +51,8 @@ export const markRead = asyncHandler(
     try {
       const notification = await notificationsService.markRead(
         req.user!.id,
-        req.params.id
+        req.params.id,
+        req.user!.companyId
       );
 
       res.json({
@@ -72,7 +74,7 @@ export const markRead = asyncHandler(
 
 export const markAllRead = asyncHandler(
   async (req: Request, res: Response) => {
-    const result = await notificationsService.markAllRead(req.user!.id);
+    const result = await notificationsService.markAllRead(req.user!.id, req.user!.companyId);
 
     res.json({
       status: 'success',

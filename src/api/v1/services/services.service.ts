@@ -1,5 +1,6 @@
 import { Service } from '@prisma/client';
 import { createPrismaClient } from '../../../config/db';
+import { AppError } from '../../../middlewares/error.handler';
 
 const prisma = createPrismaClient();
 
@@ -30,32 +31,24 @@ interface ServiceFilters {
 }
 
 export class ServicesService {
-  /**
-   * Criar um novo serviço
-   */
-  async create(data: CreateServiceDTO): Promise<Service> {
+  // 0B.1: companyId sempre do req.user; toda query é escopada.
+  async create(data: CreateServiceDTO, companyId: string): Promise<Service> {
     return await prisma.service.create({
       data: {
-        name: data.name,
-        description: data.description,
-        durationMinutes: data.durationMinutes,
-        price: data.price,
-        category: data.category,
+        ...data,
+        companyId,
         allowsCombo: data.allowsCombo ?? true,
       },
     });
   }
 
-  /**
-   * Listar serviços com filtros
-   */
-  async list(filters: ServiceFilters = {}): Promise<Service[]> {
-    const where: any = {};
-    
+  async list(filters: ServiceFilters = {}, companyId: string): Promise<Service[]> {
+    const where: any = { companyId };
+
     if (filters.category) {
       where.category = filters.category;
     }
-    
+
     if (filters.isActive !== undefined) {
       where.isActive = filters.isActive;
     }
@@ -78,45 +71,41 @@ export class ServicesService {
     });
   }
 
-  /**
-   * Buscar serviço por ID
-   */
-  async getById(id: string): Promise<Service | null> {
-    return await prisma.service.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Service | null> {
+    return await prisma.service.findFirst({
+      where: { id, companyId },
     });
   }
 
-  /**
-   * Atualizar serviço
-   */
-  async update(id: string, data: UpdateServiceDTO): Promise<Service> {
+  async update(id: string, data: UpdateServiceDTO, companyId: string): Promise<Service> {
+    const existing = await this.getById(id, companyId);
+    if (!existing) throw new AppError('Service not found', 404);
+
     return await prisma.service.update({
       where: { id },
       data,
     });
   }
 
-  /**
-   * Deletar serviço (soft delete)
-   */
-  async delete(id: string): Promise<Service> {
+  /** Deletar serviço (soft delete) */
+  async delete(id: string, companyId: string): Promise<Service> {
+    const existing = await this.getById(id, companyId);
+    if (!existing) throw new AppError('Service not found', 404);
+
     return await prisma.service.update({
       where: { id },
       data: { isActive: false },
     });
   }
 
-  /**
-   * Listar categorias únicas
-   */
-  async listCategories(): Promise<string[]> {
+  async listCategories(companyId: string): Promise<string[]> {
     const services = await prisma.service.findMany({
+      where: { companyId },
       select: { category: true },
       distinct: ['category'],
       orderBy: { category: 'asc' },
     });
-    
+
     return services.map(s => s.category);
   }
 }

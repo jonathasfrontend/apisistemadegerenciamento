@@ -12,6 +12,14 @@ import { runAppointmentStartReconcile } from '../src/jobs/appointment-start';
 
 const API = 'http://localhost:4000/api/v1';
 const prisma = new PrismaClient();
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+/** 0B.1: fail-closed — sem empresa resolvida, nenhum delete roda. */
+async function tenantId(): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (!company) throw new Error(`[cleanup] Empresa "${COMPANY_NAME}" não encontrada — abortando.`);
+  return company.id;
+}
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
 
@@ -56,7 +64,8 @@ async function listNotifications(token: string): Promise<any[]> {
   return res.body?.data?.notifications ?? [];
 }
 
-const notifyResource = (notificationsModule as any).notifyResource;
+// 0B.1: sem `as any` — assinatura real exige companyId (3º arg).
+const notifyResource = notificationsModule.notifyResource;
 
 // IDs criados pelo teste — removidos no final.
 const cleanup = {
@@ -78,10 +87,11 @@ const cleanup = {
 
 async function cleanupAll() {
   const counts: Record<string, number> = {};
+  const cid = await tenantId();
 
   if (cleanup.notifications.length) {
     const r = await prisma.notification.deleteMany({
-      where: { id: { in: cleanup.notifications } },
+      where: { companyId: cid, id: { in: cleanup.notifications } },
     });
     counts.notifications = r.count;
   }
@@ -94,6 +104,7 @@ async function cleanupAll() {
   if (cleanup.markers.length) {
     const r = await prisma.notification.deleteMany({
       where: {
+        companyId: cid,
         OR: cleanup.markers.map((m) => ({
           type: m.type,
           message: { contains: m.text },
@@ -115,6 +126,7 @@ async function cleanupAll() {
   if (testLinks.length || cleanup.appointments.length) {
     const r = await prisma.notification.deleteMany({
       where: {
+        companyId: cid,
         OR: [
           ...(testLinks.length ? [{ link: { in: testLinks } }] : []),
           ...(cleanup.appointments.length
@@ -131,16 +143,16 @@ async function cleanupAll() {
     // automaticamente) — apagados ANTES dos agendamentos, senão o FK
     // ON DELETE SET NULL deixa pagamento órfão no banco.
     const paymentsOfTest = await prisma.payment.findMany({
-      where: { appointmentId: { in: cleanup.appointments } },
+      where: { companyId: cid, appointmentId: { in: cleanup.appointments } },
       select: { id: true },
     });
     const ids = paymentsOfTest.map((p) => p.id);
     if (ids.length) {
       const commissions = await prisma.commission.deleteMany({
-        where: { paymentId: { in: ids } },
+        where: { companyId: cid, paymentId: { in: ids } },
       });
       counts.commissions = (counts.commissions ?? 0) + commissions.count;
-      const r = await prisma.payment.deleteMany({ where: { id: { in: ids } } });
+      const r = await prisma.payment.deleteMany({ where: { companyId: cid, id: { in: ids } } });
       counts.payments = (counts.payments ?? 0) + r.count;
     }
 
@@ -148,7 +160,7 @@ async function cleanupAll() {
     try {
       const { notificationQueue, appointmentStartJobId } = await import('../src/jobs/queue');
       const appointments = await prisma.appointment.findMany({
-        where: { id: { in: cleanup.appointments } },
+        where: { companyId: cid, id: { in: cleanup.appointments } },
         select: { id: true, startTime: true },
       });
       let removed = 0;
@@ -168,39 +180,39 @@ async function cleanupAll() {
 
   if (cleanup.payments.length) {
     const commissions = await prisma.commission.deleteMany({
-      where: { paymentId: { in: cleanup.payments } },
+      where: { companyId: cid, paymentId: { in: cleanup.payments } },
     });
     counts.commissions = commissions.count;
-    const r = await prisma.payment.deleteMany({ where: { id: { in: cleanup.payments } } });
+    const r = await prisma.payment.deleteMany({ where: { companyId: cid, id: { in: cleanup.payments } } });
     counts.payments = r.count;
   }
   if (cleanup.appointments.length) {
     const r = await prisma.appointment.deleteMany({
-      where: { id: { in: cleanup.appointments } },
+      where: { companyId: cid, id: { in: cleanup.appointments } },
     });
     counts.appointments = r.count;
   }
   if (cleanup.staff.length) {
-    const r = await prisma.staff.deleteMany({ where: { id: { in: cleanup.staff } } });
+    const r = await prisma.staff.deleteMany({ where: { companyId: cid, id: { in: cleanup.staff } } });
     counts.staff = r.count;
   }
   if (cleanup.products.length) {
     // stock_movements referencia products com RESTRICT — remover antes
     const movements = await prisma.stockMovement.deleteMany({
-      where: { productId: { in: cleanup.products } },
+      where: { companyId: cid, productId: { in: cleanup.products } },
     });
     counts.stockMovements = movements.count;
     const r = await prisma.product.deleteMany({
-      where: { id: { in: cleanup.products } },
+      where: { companyId: cid, id: { in: cleanup.products } },
     });
     counts.products = r.count;
   }
   if (cleanup.users.length) {
-    const r = await prisma.user.deleteMany({ where: { id: { in: cleanup.users } } });
+    const r = await prisma.user.deleteMany({ where: { companyId: cid, id: { in: cleanup.users } } });
     counts.users = r.count;
   }
   if (cleanup.clients.length) {
-    const r = await prisma.client.deleteMany({ where: { id: { in: cleanup.clients } } });
+    const r = await prisma.client.deleteMany({ where: { companyId: cid, id: { in: cleanup.clients } } });
     counts.clients = r.count;
   }
 
@@ -211,6 +223,7 @@ async function cleanupAll() {
   try {
     const admin = await login('admin@salao.com', 'admin123');
     const recepcao = await login('recepcao@salao.com', 'reception123');
+    const cid = await tenantId();
 
     // ------------------------------------------------------------- Task 2
     check(
@@ -230,7 +243,8 @@ async function cleanupAll() {
           link: '/products/verify-teste',
           dedupeKey,
         },
-        { roleNames: ['Admin'] }
+        { roleNames: ['Admin'] },
+        cid
       );
 
       const list = await listNotifications(admin);
@@ -250,7 +264,8 @@ async function cleanupAll() {
           link: '/products/verify-teste',
           dedupeKey,
         },
-        { roleNames: ['Admin'] }
+        { roleNames: ['Admin'] },
+        cid
       );
 
       const list2 = await listNotifications(admin);
@@ -258,7 +273,9 @@ async function cleanupAll() {
       check('dedupe impede duplicata para o mesmo usuário', duplicates.length === 1, `itens=${duplicates.length}`);
 
       // Limpeza do dado de teste do Task 2
-      const deleted = await prisma.notification.deleteMany({ where: { message } });
+      const deleted = await prisma.notification.deleteMany({
+        where: { companyId: await tenantId(), message },
+      });
       check('limpeza remove notificação de teste', deleted.count > 0, `removidos=${deleted.count}`);
     }
 
@@ -547,14 +564,14 @@ async function cleanupAll() {
 
     // ------------------------------------------------------------- Task 5
     const mariaStaff = await prisma.staff.findFirst({
-      where: { user: { email: 'maria@salao.com' } },
+      where: { companyId: cid, user: { email: 'maria@salao.com' } },
       select: { id: true },
     });
     const testClient = await prisma.client.findFirst({
-      where: { isBlocked: false },
+      where: { companyId: cid, isBlocked: false },
       select: { id: true, name: true },
     });
-    const testService = await prisma.service.findFirst();
+    const testService = await prisma.service.findFirst({ where: { companyId: cid } });
 
     if (mariaStaff && testClient && testService) {
       // Slot livre: tenta horários/dias até um agendamento ser aceito.

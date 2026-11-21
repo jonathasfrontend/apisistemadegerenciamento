@@ -45,7 +45,7 @@ export class UsersController {
       if (roleId) filters.roleId = roleId as string;
       if (search) filters.search = search as string;
 
-      const users = await this.usersService.list(filters);
+      const users = await this.usersService.list(filters, req.user!.companyId);
 
       res.json({
         status: 'success',
@@ -70,7 +70,7 @@ export class UsersController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const user = await this.usersService.getById(id);
+      const user = await this.usersService.getById(id, req.user!.companyId);
 
       if (!user) {
         res.status(404).json({
@@ -100,7 +100,7 @@ export class UsersController {
   update = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const user = await this.usersService.update(id, req.body);
+      const user = await this.usersService.update(id, req.body, req.user!.companyId);
 
       logger.info(`User updated: ${user.id}`);
 
@@ -126,7 +126,7 @@ export class UsersController {
       const { id } = req.params;
       const { currentPassword, newPassword } = req.body;
 
-      await this.usersService.changePassword(id, currentPassword, newPassword);
+      await this.usersService.changePassword(id, currentPassword, newPassword, req.user!.companyId);
 
       logger.info(`Password changed for user: ${id}`);
 
@@ -150,7 +150,7 @@ export class UsersController {
   deactivate = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.usersService.deactivate(id);
+      await this.usersService.deactivate(id, req.user!.companyId);
 
       logger.info(`User deactivated: ${id}`);
 
@@ -174,7 +174,7 @@ export class UsersController {
   activate = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.usersService.activate(id);
+      await this.usersService.activate(id, req.user!.companyId);
 
       logger.info(`User activated: ${id}`);
 
@@ -198,7 +198,7 @@ export class UsersController {
   delete = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.usersService.delete(id);
+      await this.usersService.delete(id, req.user!.companyId);
 
       logger.info(`User deleted: ${id}`);
 

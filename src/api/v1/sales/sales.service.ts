@@ -1,5 +1,6 @@
 import { PaymentMethod, Sale } from '@prisma/client';
 import { createPrismaClient } from '../../../config/db';
+import { AppError } from '../../../middlewares/error.handler';
 import { runSerializable } from '../../../utils/transaction';
 import { crossedLowStock, LowStockProduct, notifyLowStock } from '../products/low-stock';
 
@@ -31,6 +32,15 @@ export class SalesService {
       // Vendas que cruzam o limite de reposição (aviso só depois do commit)
       const lowStockEvents: { product: LowStockProduct; eventId: string }[] = [];
 
+      // Cliente do body precisa pertencer ao tenant da venda.
+      if (data.clientId) {
+        const client = await tx.client.findFirst({
+          where: { id: data.clientId, companyId },
+          select: { id: true },
+        });
+        if (!client) throw new AppError('Client not found', 404);
+      }
+
       // Criar venda
       const newSale = await tx.sale.create({
         data: {
@@ -40,6 +50,7 @@ export class SalesService {
           paymentMethod: data.paymentMethod,
           items: {
             create: data.items.map(item => ({
+              companyId,
               productId: item.productId,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
@@ -59,8 +70,8 @@ export class SalesService {
 
       // Atualizar estoque
       for (const item of data.items) {
-        const product = await tx.product.findUnique({
-          where: { id: item.productId },
+        const product = await tx.product.findFirst({
+          where: { id: item.productId, companyId },
         });
 
         if (!product || product.quantity < item.quantity) {
@@ -79,6 +90,7 @@ export class SalesService {
         // Registrar movimentação de estoque
         const movement = await tx.stockMovement.create({
           data: {
+            companyId,
             productId: item.productId,
             type: 'OUT',
             quantity: item.quantity,
@@ -98,7 +110,7 @@ export class SalesService {
 
     // Avisar depois do commit — notificação é best-effort
     for (const event of sale.lowStockEvents) {
-      await notifyLowStock(event.product, event.eventId);
+      await notifyLowStock(event.product, event.eventId, companyId);
     }
 
     return sale.sale;

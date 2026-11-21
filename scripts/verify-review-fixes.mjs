@@ -184,14 +184,21 @@ const check = (name, ok, detail = '') => {
     const { PrismaClient } = await import('@prisma/client');
     const prisma = new PrismaClient();
 
-    await prisma.notification.deleteMany({ where: { appointmentId: { in: createdIds } } });
-    await prisma.payment.deleteMany({ where: { appointmentId: { in: createdIds } } });
-    await prisma.appointment.deleteMany({ where: { id: { in: createdIds } } });
+    // 0B.1: fail-closed — sem empresa resolvida, nenhum delete de fixture roda.
+    const company = await prisma.company.findFirst({
+      where: { name: process.env.FINANCE_COMPANY_NAME || 'Empresa padrão' },
+    });
+    if (!company) throw new Error('[gate] Empresa não encontrada — abortando cleanup.');
+    const cid = company.id;
+
+    await prisma.notification.deleteMany({ where: { companyId: cid, appointmentId: { in: createdIds } } });
+    await prisma.payment.deleteMany({ where: { companyId: cid, appointmentId: { in: createdIds } } });
+    await prisma.appointment.deleteMany({ where: { companyId: cid, id: { in: createdIds } } });
 
     // Restaura contador de faltas e bloqueio exatamente como estavam.
     for (const [id, state] of initialState.entries()) {
-      await prisma.client.update({
-        where: { id },
+      await prisma.client.updateMany({
+        where: { companyId: cid, id },
         data: { noShowCount: state.noShowCount, isBlocked: state.isBlocked },
       });
     }

@@ -17,6 +17,7 @@ import { scheduleAppointmentStart } from '../../../jobs/appointment-start';
 const ACTIVE_STATUSES: AppointmentStatus[] = ['SCHEDULED', 'CONFIRMED'];
 
 type AppointmentWhereInput = {
+  companyId?: string;
   staffId?: string;
   clientId?: string;
   status?: any;
@@ -59,8 +60,8 @@ interface UpdateAppointmentInput {
 export class AppointmentService {
   async create(data: CreateAppointmentInput, createdBy: string, companyId: string) {
     // Validate client exists
-    const client = await prisma.client.findUnique({
-      where: { id: data.clientId },
+    const client = await prisma.client.findFirst({
+      where: { id: data.clientId, companyId },
     });
 
     if (!client) {
@@ -72,8 +73,8 @@ export class AppointmentService {
     }
 
     // Validate staff exists
-    const staff = await prisma.staff.findUnique({
-      where: { id: data.staffId },
+    const staff = await prisma.staff.findFirst({
+      where: { id: data.staffId, companyId },
     });
 
     if (!staff || !staff.isAvailable) {
@@ -91,7 +92,9 @@ export class AppointmentService {
     const hasConflict = await this.checkConflict(
       data.staffId,
       data.startTime,
-      endTime
+      endTime,
+      undefined,
+      companyId
     );
 
     if (hasConflict) {
@@ -103,6 +106,7 @@ export class AppointmentService {
       // Create the appointment
       const newAppointment = await tx.appointment.create({
         data: {
+          companyId,
           clientId: data.clientId,
           staffId: data.staffId,
           startTime: data.startTime,
@@ -154,7 +158,7 @@ export class AppointmentService {
       message: `Novo agendamento: ${client.name} em ${formatDateTime(appointment.startTime)}`,
       appointmentId: appointment.id,
       link: `/appointments/${appointment.id}`,
-    });
+    }, companyId);
 
     // Aviso "começando agora" no horário exato (BullMQ + reconciliador)
     await scheduleAppointmentStart({
@@ -162,6 +166,7 @@ export class AppointmentService {
       startTime: appointment.startTime,
       client: { name: client.name },
       staff: { userId: appointment.staff.userId },
+      companyId,
     });
 
     return appointment;
@@ -176,11 +181,11 @@ export class AppointmentService {
     date?: string;
     startDate?: string;
     endDate?: string;
-  }) {
+  }, companyId: string) {
     const { page = 1, limit = 50, staffId, clientId, status, date, startDate, endDate } = params;
     const skip = (page - 1) * limit;
 
-    const where: AppointmentWhereInput = {};
+    const where: AppointmentWhereInput = { companyId };
 
     if (staffId) {
       where.staffId = staffId;
@@ -278,9 +283,9 @@ export class AppointmentService {
     };
   }
 
-  async findById(id: string) {
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
+  async findById(id: string, companyId: string) {
+    const appointment = await prisma.appointment.findFirst({
+      where: { id, companyId },
       include: {
         client: true,
         staff: {
@@ -301,9 +306,9 @@ export class AppointmentService {
     return appointment;
   }
 
-  async update(id: string, data: UpdateAppointmentInput) {
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
+  async update(id: string, data: UpdateAppointmentInput, companyId: string) {
+    const appointment = await prisma.appointment.findFirst({
+      where: { id, companyId },
     });
 
     if (!appointment) {
@@ -312,6 +317,15 @@ export class AppointmentService {
 
     // Check if rescheduling
     if (data.startTime || data.staffId) {
+      // Novo profissional precisa pertencer ao tenant antes de qualquer escrita.
+      if (data.staffId) {
+        const targetStaff = await prisma.staff.findFirst({
+          where: { id: data.staffId, companyId },
+          select: { id: true },
+        });
+        if (!targetStaff) throw new AppError('Staff not found', 404);
+      }
+
       const staffId = data.staffId || appointment.staffId;
       const startTime = data.startTime || appointment.startTime;
       const duration = (appointment.endTime.getTime() - appointment.startTime.getTime()) / 60000;
@@ -319,7 +333,7 @@ export class AppointmentService {
       const endTime = new Date(startTime);
       endTime.setMinutes(endTime.getMinutes() + duration);
 
-      const hasConflict = await this.checkConflict(staffId, startTime, endTime, id);
+      const hasConflict = await this.checkConflict(staffId, startTime, endTime, id, companyId);
 
       if (hasConflict) {
         throw new AppError('Time slot not available', 400);
@@ -351,7 +365,7 @@ export class AppointmentService {
         });
 
         if (data.status === 'COMPLETED') {
-          await this.notifyPaymentState(updated);
+          await this.notifyPaymentState(updated, companyId);
         }
 
         if (data.startTime) {
@@ -361,6 +375,7 @@ export class AppointmentService {
             startTime: updated.startTime,
             client: { name: updated.client.name },
             staff: { userId: updated.staff.userId },
+            companyId,
           });
         }
 
@@ -386,7 +401,7 @@ export class AppointmentService {
     });
 
     if (data.status === 'COMPLETED') {
-      await this.notifyPaymentState(updated);
+      await this.notifyPaymentState(updated, companyId);
     }
 
     return updated;
@@ -403,7 +418,7 @@ export class AppointmentService {
     isPaid: boolean;
     client: { name: string };
     payments?: Array<{ status: string }>;
-  }): Promise<void> {
+  }, companyId: string): Promise<void> {
     const paid =
       appointment.isPaid || (appointment.payments ?? []).some((p) => p.status === 'PAID');
 
@@ -417,13 +432,14 @@ export class AppointmentService {
         link: `/appointments/${appointment.id}`,
         dedupeKey: `${paid ? 'PAYMENT_PAID' : 'PAYMENT_PENDING'}:${appointment.id}`,
       },
-      { roleNames: ['Admin', 'Recepção'] }
+      { roleNames: ['Admin', 'Recepção'] },
+      companyId
     );
   }
 
-  async cancel(id: string) {
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
+  async cancel(id: string, companyId: string) {
+    const appointment = await prisma.appointment.findFirst({
+      where: { id, companyId },
       include: { payments: true },
     });
 
@@ -442,7 +458,7 @@ export class AppointmentService {
       // status ATIVO impede que um appointment já CANCELLED ou NO_SHOW seja
       // cancelado (e vice-versa) — os dois efeitos não podem coexistir.
       const claimed = await tx.appointment.updateMany({
-        where: { id, status: { in: ACTIVE_STATUSES } },
+        where: { id, companyId, status: { in: ACTIVE_STATUSES } },
         data: { status: 'CANCELLED' },
       });
 
@@ -479,6 +495,7 @@ export class AppointmentService {
       // Cancel pending payments
       await tx.payment.updateMany({
         where: {
+          companyId,
           appointmentId: id,
           status: { in: ['PENDING', 'PARTIAL'] },
         },
@@ -494,14 +511,14 @@ export class AppointmentService {
       message: `Agendamento cancelado: ${result.client.name} em ${formatDateTime(result.startTime)}`,
       appointmentId: result.id,
       link: `/appointments/${result.id}`,
-    });
+    }, companyId);
 
     return result;
   }
 
-  async markNoShow(id: string) {
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
+  async markNoShow(id: string, companyId: string) {
+    const appointment = await prisma.appointment.findFirst({
+      where: { id, companyId },
       include: { client: true },
     });
 
@@ -522,7 +539,7 @@ export class AppointmentService {
       // contador acontece DEPOIS e apenas para quem reivindicou a transição.
       // Filtra por status ATIVO: appointment CANCELLED/COMPLETED não vira falta.
       const claimed = await tx.appointment.updateMany({
-        where: { id, status: { in: ACTIVE_STATUSES } },
+        where: { id, companyId, status: { in: ACTIVE_STATUSES } },
         data: { status: 'NO_SHOW' },
       });
 
@@ -572,12 +589,12 @@ export class AppointmentService {
       message: `Falta registrada: ${appointment.client.name} em ${formatDateTime(appointment.startTime)}`,
       appointmentId: appointment.id,
       link: `/appointments/${appointment.id}`,
-    });
+    }, companyId);
 
     return updated;
   }
 
-  async checkAvailability(staffId: string, date: string) {
+  async checkAvailability(staffId: string, date: string, companyId: string) {
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(date);
@@ -585,6 +602,7 @@ export class AppointmentService {
 
     const appointments = await prisma.appointment.findMany({
       where: {
+        companyId,
         staffId,
         startTime: {
           gte: startOfDay,
@@ -604,9 +622,11 @@ export class AppointmentService {
     staffId: string,
     startTime: Date,
     endTime: Date,
-    excludeId?: string
+    excludeId: string | undefined,
+    companyId: string
   ): Promise<boolean> {
     const where: AppointmentWhereInput = {
+      companyId,
       staffId,
       status: {
         notIn: ['CANCELLED', 'NO_SHOW'],
@@ -642,10 +662,11 @@ export class AppointmentService {
     return !!conflict;
   }
 
-  async getStats(params: { staffId?: string; startDate: string; endDate: string }) {
+  async getStats(params: { staffId?: string; startDate: string; endDate: string }, companyId: string) {
     const { staffId, startDate, endDate } = params;
 
     const where: AppointmentWhereInput = {
+      companyId,
       startTime: {
         gte: new Date(startDate),
         lte: new Date(endDate),

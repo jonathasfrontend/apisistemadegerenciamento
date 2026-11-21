@@ -15,7 +15,7 @@ export class StaffController {
    */
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const staff = await this.staffService.create(req.body);
+      const staff = await this.staffService.create(req.body, req.user!.companyId);
       
       logger.info(`Staff created: ${staff.id}`);
       
@@ -45,7 +45,7 @@ export class StaffController {
       if (specialty) filters.specialty = specialty as string;
       if (search) filters.search = search as string;
 
-      const staff = await this.staffService.list(filters);
+      const staff = await this.staffService.list(filters, req.user!.companyId);
       
       res.json({
         status: 'success',
@@ -67,7 +67,7 @@ export class StaffController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const staff = await this.staffService.getById(id);
+      const staff = await this.staffService.getById(id, req.user!.companyId);
       
       if (!staff) {
         res.status(404).json({
@@ -97,7 +97,7 @@ export class StaffController {
   update = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const staff = await this.staffService.update(id, req.body);
+      const staff = await this.staffService.update(id, req.body, req.user!.companyId);
       
       logger.info(`Staff updated: ${id}`);
       
@@ -121,7 +121,7 @@ export class StaffController {
   delete = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.staffService.delete(id);
+      await this.staffService.delete(id, req.user!.companyId);
       
       logger.info(`Staff deleted: ${id}`);
       
@@ -155,7 +155,7 @@ export class StaffController {
         return;
       }
 
-      const availability = await this.staffService.checkAvailability(id, new Date(date as string));
+      const availability = await this.staffService.checkAvailability(id, new Date(date as string), req.user!.companyId);
       
       res.json({
         status: 'success',
@@ -177,7 +177,7 @@ export class StaffController {
   getSchedule = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const schedule = await this.staffService.getSchedule(id);
+      const schedule = await this.staffService.getSchedule(id, req.user!.companyId);
       
       res.json({
         status: 'success',
@@ -209,7 +209,7 @@ export class StaffController {
         return;
       }
 
-      const result = await this.staffService.assignRole(id, roleId);
+      const result = await this.staffService.assignRole(id, roleId, req.user!.companyId);
       
       logger.info(`Role assigned to staff: ${id} by user ${req.user?.id}`);
       

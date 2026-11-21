@@ -27,8 +27,11 @@ export class AuthService {
   async login(input: LoginInput): Promise<AuthResponse> {
     const { email, password } = input;
 
-    // Find user with role and permissions
-    const user: any = await prisma.user.findUnique({
+    // 0B.1: email é unique composto [companyId, email]. O login público não
+    // recebe empresa; findFirst por email seria não determinístico quando duas
+    // empresas usam o mesmo endereço. Fail-closed: só autentica se houver
+    // exatamente um candidato (sem revelar quantos/onde estão os demais).
+    const candidates: any[] = await prisma.user.findMany({
       where: { email: email.toLowerCase() },
       include: {
         role: {
@@ -42,6 +45,8 @@ export class AuthService {
         },
       } as any,
     });
+
+    const user = candidates.length === 1 ? candidates[0] : null;
 
     if (!user || !user.isActive) {
       throw new AppError('Invalid credentials', 401);
@@ -69,7 +74,7 @@ export class AuthService {
       companyId: user.companyId,
     });
 
-    const refreshToken = await this.generateRefreshToken(user.id);
+    const refreshToken = await this.generateRefreshToken(user.id, user.companyId);
 
     // Update last login
     await prisma.user.update({
@@ -143,7 +148,7 @@ export class AuthService {
       companyId: storedToken.user.companyId,
     });
 
-    const newRefreshToken = await this.generateRefreshToken(storedToken.user.id);
+    const newRefreshToken = await this.generateRefreshToken(storedToken.user.id, storedToken.user.companyId);
 
     return {
       accessToken: newAccessToken,
@@ -151,11 +156,13 @@ export class AuthService {
     };
   }
 
-  async logout(refreshToken: string): Promise<void> {
+  async logout(refreshToken: string, companyId?: string): Promise<void> {
     const tokenHash = this.hashToken(refreshToken);
 
+    // 0B.1: companyId é opcional porque /auth/logout é pública; quando presente,
+    // escopa a revogação para não tocar tokens de outra empresa.
     await prisma.refreshToken.updateMany({
-      where: { tokenHash },
+      where: { tokenHash, ...(companyId ? { companyId } : {}) },
       data: { revoked: true },
     });
 
@@ -171,7 +178,7 @@ export class AuthService {
     const { email, password, name, roleId } = input;
 
     // Check if user exists
-    const existingUser = await prisma.user.findUnique({
+    const existingUser = await prisma.user.findFirst({
       where: { email: email.toLowerCase() },
     });
 
@@ -247,7 +254,7 @@ export class AuthService {
       companyId: user.companyId,
     });
 
-    const refreshToken = await this.generateRefreshToken(user.id);
+    const refreshToken = await this.generateRefreshToken(user.id, user.companyId);
 
     logger.info(`New user registered: ${user.email}`);
 
@@ -270,7 +277,7 @@ export class AuthService {
     } as jwt.SignOptions);
   }
 
-  private async generateRefreshToken(userId: string): Promise<string> {
+  private async generateRefreshToken(userId: string, companyId: string): Promise<string> {
     const token = randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(token);
 
@@ -280,6 +287,7 @@ export class AuthService {
     await prisma.refreshToken.create({
       data: {
         userId,
+        companyId,
         tokenHash,
         expiresAt,
       },

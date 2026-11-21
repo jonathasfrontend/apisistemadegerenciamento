@@ -2,6 +2,7 @@ import prisma from '../../../config/db';
 import { AppError } from '../../../middlewares/error.handler';
 
 type ClientWhereInput = {
+  companyId?: string;
   OR?: Array<{
     name?: { contains: string; mode: 'insensitive' };
     phone?: { contains: string };
@@ -49,20 +50,19 @@ function escapeCsvCell(value: unknown): string {
 }
 
 export class ClientService {
-  async create(data: CreateClientInput) {
-    // Check if phone already exists
-    const existingClient = await prisma.client.findUnique({
-      where: { phone: data.phone },
+  // 0B.1: toda query é escopada por companyId (do req.user, nunca do body).
+  async create(data: CreateClientInput, companyId: string) {
+    const existingClient = await prisma.client.findFirst({
+      where: { companyId, phone: data.phone },
     });
 
     if (existingClient) {
       throw new AppError('Phone number already registered', 400);
     }
 
-    // Check CPF if provided
     if (data.cpf) {
-      const existingCPF = await prisma.client.findUnique({
-        where: { cpf: data.cpf },
+      const existingCPF = await prisma.client.findFirst({
+        where: { companyId, cpf: data.cpf },
       });
 
       if (existingCPF) {
@@ -73,6 +73,7 @@ export class ClientService {
     const client = await prisma.client.create({
       data: {
         ...data,
+        companyId,
         consentDate: data.consentLGPD ? new Date() : null,
       },
     });
@@ -80,16 +81,19 @@ export class ClientService {
     return client;
   }
 
-  async findAll(params: {
-    page?: number;
-    limit?: number;
-    search?: string;
-    isBlocked?: boolean;
-  }) {
+  async findAll(
+    params: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      isBlocked?: boolean;
+    },
+    companyId: string
+  ) {
     const { page = 1, limit = 20, search, isBlocked } = params;
     const skip = (page - 1) * limit;
 
-    const where: ClientWhereInput = {};
+    const where: ClientWhereInput = { companyId };
 
     if (search) {
       where.OR = [
@@ -136,8 +140,9 @@ export class ClientService {
    * Exportação de clientes em CSV, gerada no servidor.
    * Sem paginação: o arquivo contém todos os registros do tenant.
    */
-  async exportCsv(): Promise<{ csv: string; count: number }> {
+  async exportCsv(companyId: string): Promise<{ csv: string; count: number }> {
     const clients = await prisma.client.findMany({
+      where: { companyId },
       orderBy: { createdAt: 'asc' },
       select: {
         name: true,
@@ -178,9 +183,9 @@ export class ClientService {
     return { csv, count: clients.length };
   }
 
-  async findById(id: string) {
-    const client = await prisma.client.findUnique({
-      where: { id },
+  async findById(id: string, companyId: string) {
+    const client = await prisma.client.findFirst({
+      where: { id, companyId },
       include: {
         appointments: {
           take: 10,
@@ -212,19 +217,19 @@ export class ClientService {
     return client;
   }
 
-  async update(id: string, data: UpdateClientInput) {
-    const client = await prisma.client.findUnique({
-      where: { id },
+  async update(id: string, data: UpdateClientInput, companyId: string) {
+    const client = await prisma.client.findFirst({
+      where: { id, companyId },
     });
 
     if (!client) {
       throw new AppError('Client not found', 404);
     }
 
-    // Check if phone is being changed and already exists
+    // Check if phone is being changed and already exists in this company
     if (data.phone && data.phone !== client.phone) {
-      const existingPhone = await prisma.client.findUnique({
-        where: { phone: data.phone },
+      const existingPhone = await prisma.client.findFirst({
+        where: { companyId, phone: data.phone },
       });
 
       if (existingPhone) {
@@ -240,9 +245,9 @@ export class ClientService {
     return updated;
   }
 
-  async delete(id: string) {
-    const client = await prisma.client.findUnique({
-      where: { id },
+  async delete(id: string, companyId: string) {
+    const client = await prisma.client.findFirst({
+      where: { id, companyId },
     });
 
     if (!client) {
@@ -257,8 +262,8 @@ export class ClientService {
   }
 
   async getHistory(id: string, companyId: string) {
-    const client = await prisma.client.findUnique({
-      where: { id },
+    const client = await prisma.client.findFirst({
+      where: { id, companyId },
     });
 
     if (!client) {
@@ -267,7 +272,7 @@ export class ClientService {
 
     const [appointments, payments, totalSpent] = await Promise.all([
       prisma.appointment.findMany({
-        where: { clientId: id },
+        where: { clientId: id, companyId },
         orderBy: { startTime: 'desc' },
         include: {
           staff: {
@@ -301,8 +306,16 @@ export class ClientService {
     };
   }
 
-  async markNoShow(id: string) {
-    const client = await prisma.client.update({
+  async markNoShow(id: string, companyId: string) {
+    const client = await prisma.client.findFirst({
+      where: { id, companyId },
+    });
+
+    if (!client) {
+      throw new AppError('Client not found', 404);
+    }
+
+    const updated = await prisma.client.update({
       where: { id },
       data: {
         noShowCount: {
@@ -312,22 +325,23 @@ export class ClientService {
     });
 
     // Auto-block if too many no-shows
-    if (client.noShowCount >= 3) {
+    if (updated.noShowCount >= 3) {
       await prisma.client.update({
         where: { id },
         data: { isBlocked: true },
       });
     }
 
-    return client;
+    return updated;
   }
 
-  async getInactiveClients(daysInactive: number = 60) {
+  async getInactiveClients(daysInactive: number = 60, companyId: string) {
     const date = new Date();
     date.setDate(date.getDate() - daysInactive);
 
     const clients = await prisma.client.findMany({
       where: {
+        companyId,
         appointments: {
           every: {
             startTime: {

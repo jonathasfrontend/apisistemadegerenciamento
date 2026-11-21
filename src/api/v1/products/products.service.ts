@@ -1,5 +1,6 @@
 import { NotificationType, Product, StockMovement } from '@prisma/client';
 import { createPrismaClient } from '../../../config/db';
+import { AppError } from '../../../middlewares/error.handler';
 import { notifyResource } from '../notifications/notifications.service';
 import { crossedLowStock, notifyLowStock } from './low-stock';
 import { runSerializable } from '../../../utils/transaction';
@@ -39,13 +40,10 @@ interface ProductFilters {
 }
 
 export class ProductsService {
-  /**
-   * Criar um novo produto
-   */
-  async create(data: CreateProductDTO): Promise<Product> {
-    // Verificar se SKU já existe
-    const existingProduct = await prisma.product.findUnique({
-      where: { sku: data.sku },
+  // 0B.1: companyId do req.user; SKU é unique composto [companyId, sku].
+  async create(data: CreateProductDTO, companyId: string): Promise<Product> {
+    const existingProduct = await prisma.product.findFirst({
+      where: { companyId, sku: data.sku },
     });
 
     if (existingProduct) {
@@ -54,22 +52,16 @@ export class ProductsService {
 
     const product = await prisma.product.create({
       data: {
-        sku: data.sku,
-        name: data.name,
-        description: data.description,
-        category: data.category,
-        quantity: data.quantity,
-        costPrice: data.costPrice,
-        salePrice: data.salePrice,
+        ...data,
+        companyId,
         reorderThreshold: data.reorderThreshold || 10,
-        supplier: data.supplier,
       },
     });
 
-    // Registrar movimentação inicial de estoque
     if (data.quantity > 0) {
       await prisma.stockMovement.create({
         data: {
+          companyId,
           productId: product.id,
           type: 'IN',
           quantity: data.quantity,
@@ -86,31 +78,28 @@ export class ProductsService {
         link: `/products/${product.id}`,
         dedupeKey: `NEW_PRODUCT:${product.id}`,
       },
-      { roleNames: ['Admin', 'Recepção'] }
+      { roleNames: ['Admin', 'Recepção'] },
+      companyId
     );
 
-    // Produto já criado abaixo do limite de reposição
     if (product.quantity <= product.reorderThreshold) {
-      await notifyLowStock(product, 'create');
+      await notifyLowStock(product, 'create', companyId);
     }
 
     return product;
   }
 
-  /**
-   * Listar produtos com filtros
-   */
-  async list(filters: ProductFilters = {}): Promise<Product[]> {
-    const where: any = {};
-    
+  async list(filters: ProductFilters = {}, companyId: string): Promise<Product[]> {
+    const where: any = { companyId };
+
     if (filters.category) {
       where.category = filters.category;
     }
-    
+
     if (filters.isActive !== undefined) {
       where.isActive = filters.isActive;
     }
-    
+
     if (filters.lowStock) {
       where.quantity = {
         lte: prisma.product.fields.reorderThreshold,
@@ -130,17 +119,13 @@ export class ProductsService {
         { category: 'asc' },
         { name: 'asc' },
       ],
-      // Limite opcional: usado pela busca global para não puxar a tabela inteira
       ...(filters.limit ? { take: filters.limit } : {}),
     });
   }
 
-  /**
-   * Buscar produto por ID
-   */
-  async getById(id: string): Promise<Product | null> {
-    return await prisma.product.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Product | null> {
+    return await prisma.product.findFirst({
+      where: { id, companyId },
       include: {
         _count: {
           select: {
@@ -152,20 +137,16 @@ export class ProductsService {
     });
   }
 
-  /**
-   * Atualizar produto
-   */
-  async update(id: string, data: UpdateProductDTO): Promise<Product> {
-    // Se estiver alterando o SKU, verificar se já existe
+  async update(id: string, data: UpdateProductDTO, companyId: string): Promise<Product> {
+    const existing = await this.getById(id, companyId);
+    if (!existing) throw new AppError('Product not found', 404);
+
     if (data.sku) {
-      const existingProduct = await prisma.product.findFirst({
-        where: {
-          sku: data.sku,
-          NOT: { id },
-        },
+      const duplicate = await prisma.product.findFirst({
+        where: { companyId, sku: data.sku, NOT: { id } },
       });
 
-      if (existingProduct) {
+      if (duplicate) {
         throw new Error('Product with this SKU already exists');
       }
     }
@@ -176,36 +157,35 @@ export class ProductsService {
     });
   }
 
-  /**
-   * Deletar produto (soft delete)
-   */
-  async delete(id: string): Promise<Product> {
+  /** Deletar produto (soft delete) */
+  async delete(id: string, companyId: string): Promise<Product> {
+    const existing = await this.getById(id, companyId);
+    if (!existing) throw new AppError('Product not found', 404);
+
     return await prisma.product.update({
       where: { id },
       data: { isActive: false },
     });
   }
 
-  /**
-   * Adicionar estoque
-   */
   async addStock(
     productId: string,
     quantity: number,
+    companyId: string,
     reason?: string,
     reference?: string
   ): Promise<Product> {
-    const product = await prisma.product.update({
+    const product = await this.getById(productId, companyId);
+    if (!product) throw new AppError('Product not found', 404);
+
+    const updated = await prisma.product.update({
       where: { id: productId },
-      data: {
-        quantity: {
-          increment: quantity,
-        },
-      },
+      data: { quantity: { increment: quantity } },
     });
 
     await prisma.stockMovement.create({
       data: {
+        companyId,
         productId,
         type: 'IN',
         quantity,
@@ -214,25 +194,23 @@ export class ProductsService {
       },
     });
 
-    return product;
+    return updated;
   }
 
   /**
-   * Remover estoque
-   *
-   * A leitura do saldo + decremento rodam em transação SERIALIZABLE: duas
-   * saídas concorrentes do mesmo produto não podem calcular a travessia do
-   * limite a partir do mesmo estado (evita dois avisos de estoque baixo).
+   * Leitura do saldo + decremento em transação SERIALIZABLE.
+   * 0B.1: companyId escopa produto e movimentação.
    */
   async removeStock(
     productId: string,
     quantity: number,
+    companyId: string,
     reason?: string,
     reference?: string
   ): Promise<Product> {
     const { updatedProduct, crossed } = await runSerializable(prisma, async (tx) => {
-      const product = await tx.product.findUnique({
-        where: { id: productId },
+      const product = await tx.product.findFirst({
+        where: { id: productId, companyId },
       });
 
       if (!product) {
@@ -245,15 +223,12 @@ export class ProductsService {
 
       const updated = await tx.product.update({
         where: { id: productId },
-        data: {
-          quantity: {
-            decrement: quantity,
-          },
-        },
+        data: { quantity: { decrement: quantity } },
       });
 
       const movement = await tx.stockMovement.create({
         data: {
+          companyId,
           productId,
           type: 'OUT',
           quantity,
@@ -262,7 +237,6 @@ export class ProductsService {
         },
       });
 
-      // Aviso de estoque baixo só na travessia do limite
       const didCross = crossedLowStock(
         product.quantity,
         updated.quantity,
@@ -272,23 +246,17 @@ export class ProductsService {
       return { updatedProduct: updated, crossed: didCross ? movement.id : null };
     });
 
-    // Avisar depois do commit — notificação é best-effort
     if (crossed) {
-      await notifyLowStock(updatedProduct, crossed);
+      await notifyLowStock(updatedProduct, crossed, companyId);
     }
 
     return updatedProduct;
   }
 
-  /**
-   * Obter histórico de movimentações
-   */
-  async getMovements(productId: string): Promise<StockMovement[]> {
+  async getMovements(productId: string, companyId: string): Promise<StockMovement[]> {
     return await prisma.stockMovement.findMany({
-      where: { productId },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      where: { productId, companyId },
+      orderBy: { createdAt: 'desc' },
       take: 50,
     });
   }

@@ -44,7 +44,7 @@ describe('appointment payment tenant scope (F0B.0)', () => {
     }
 
     const staff = await prisma.staff.create({
-      data: { userId: fixture.userAId, specialties: [] },
+      data: { companyId: fixture.companyAId, userId: fixture.userAId, specialties: [] },
     });
     staffId = staff.id;
   }, 60_000);

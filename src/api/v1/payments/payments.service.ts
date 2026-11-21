@@ -29,6 +29,22 @@ export class PaymentsService {
    * Criar um novo pagamento
    */
   async create(data: CreatePaymentDTO, companyId: string): Promise<Payment> {
+    // Referências do body também são fronteira de tenant: a linha criada é
+    // escopada, mas uma FK alheia would link o pagamento a outro empresa.
+    const client = await prisma.client.findFirst({
+      where: { id: data.clientId, companyId },
+      select: { id: true },
+    });
+    if (!client) throw new AppError('Client not found', 404);
+
+    if (data.appointmentId) {
+      const appointment = await prisma.appointment.findFirst({
+        where: { id: data.appointmentId, companyId },
+        select: { id: true },
+      });
+      if (!appointment) throw new AppError('Appointment not found', 404);
+    }
+
     const payment = await prisma.payment.create({
       data: {
         // companyId depois do spread: valor do cliente nunca sobrescreve o contexto
@@ -192,6 +208,7 @@ export class PaymentsService {
 
         await prisma.commission.create({
           data: {
+            companyId,
             paymentId: payment.id,
             staffId: appointment.staffId,
             amount: commissionAmount,
@@ -214,7 +231,8 @@ export class PaymentsService {
           link: `/appointments/${payment.appointmentId}`,
           dedupeKey: `PAYMENT_PAID:${payment.appointmentId}`,
         },
-        { roleNames: ['Admin', 'Recepção'] }
+        { roleNames: ['Admin', 'Recepção'] },
+        companyId
       );
     }
 
@@ -246,7 +264,7 @@ export class PaymentsService {
 
     // Marcar comissões como não pagas
     await prisma.commission.updateMany({
-      where: { paymentId: id },
+      where: { paymentId: id, companyId },
       data: { isPaid: false },
     });
 

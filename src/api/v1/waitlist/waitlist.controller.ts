@@ -11,7 +11,7 @@ export class WaitlistController {
 
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const entry = await this.waitlistService.create(req.body);
+      const entry = await this.waitlistService.create(req.body, req.user!.companyId);
       logger.info(`Waitlist entry created: ${entry.id}`);
       res.status(201).json({ status: 'success', data: { entry } });
     } catch (error: any) {
@@ -24,6 +24,7 @@ export class WaitlistController {
     try {
       const { isContacted } = req.query;
       const entries = await this.waitlistService.list(
+        req.user!.companyId,
         isContacted !== undefined ? isContacted === 'true' : undefined
       );
       res.json({ status: 'success', data: entries });
@@ -36,7 +37,7 @@ export class WaitlistController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const entry = await this.waitlistService.getById(id);
+      const entry = await this.waitlistService.getById(id, req.user!.companyId);
       
       if (!entry) {
         res.status(404).json({ status: 'error', message: 'Waitlist entry not found' });
@@ -53,7 +54,7 @@ export class WaitlistController {
   update = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const entry = await this.waitlistService.update(id, req.body);
+      const entry = await this.waitlistService.update(id, req.body, req.user!.companyId);
       logger.info(`Waitlist entry updated: ${id}`);
       res.json({ status: 'success', data: { entry } });
     } catch (error: any) {
@@ -65,7 +66,7 @@ export class WaitlistController {
   markAsContacted = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const entry = await this.waitlistService.markAsContacted(id);
+      const entry = await this.waitlistService.markAsContacted(id, req.user!.companyId);
       logger.info(`Waitlist entry marked as contacted: ${id}`);
       res.json({ status: 'success', data: { entry } });
     } catch (error: any) {
@@ -77,7 +78,7 @@ export class WaitlistController {
   delete = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.waitlistService.delete(id);
+      await this.waitlistService.delete(id, req.user!.companyId);
       logger.info(`Waitlist entry deleted: ${id}`);
       res.json({ status: 'success', message: 'Entry deleted successfully' });
     } catch (error: any) {

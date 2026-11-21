@@ -16,6 +16,14 @@
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+/** 0B.1: fail-closed — sem empresa resolvida, nenhum delete roda. */
+async function tenantId(): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (!company) throw new Error(`[cleanup] Empresa "${COMPANY_NAME}" não encontrada — abortando.`);
+  return company.id;
+}
 
 const QA_PRODUCT_ID = 'b37a6005-aaaa-49df-b6a6-3f0928e66142';
 const QA_APPOINTMENT_ID = '73717a9f-14a4-4b92-ba18-42222379a8ac';
@@ -23,8 +31,10 @@ const QA_APPOINTMENT_ID = '73717a9f-14a4-4b92-ba18-42222379a8ac';
 const apply = process.argv.includes('--apply');
 
 (async () => {
-  const product = await prisma.product.findUnique({
-    where: { id: QA_PRODUCT_ID },
+  const cid = await tenantId();
+
+  const product = await prisma.product.findFirst({
+    where: { id: QA_PRODUCT_ID, companyId: cid },
     select: {
       id: true,
       name: true,
@@ -33,8 +43,8 @@ const apply = process.argv.includes('--apply');
     },
   });
 
-  const appointment = await prisma.appointment.findUnique({
-    where: { id: QA_APPOINTMENT_ID },
+  const appointment = await prisma.appointment.findFirst({
+    where: { id: QA_APPOINTMENT_ID, companyId: cid },
     select: {
       id: true,
       status: true,
@@ -48,6 +58,7 @@ const apply = process.argv.includes('--apply');
   // as vinculadas por appointmentId.
   const notifications = await prisma.notification.findMany({
     where: {
+      companyId: cid,
       OR: [
         { appointmentId: QA_APPOINTMENT_ID },
         { link: `/products/${QA_PRODUCT_ID}` },
@@ -58,12 +69,12 @@ const apply = process.argv.includes('--apply');
   });
 
   const payments = await prisma.payment.findMany({
-    where: { appointmentId: QA_APPOINTMENT_ID },
+    where: { companyId: cid, appointmentId: QA_APPOINTMENT_ID },
     select: { id: true, status: true, amount: true, _count: { select: { commissions: true } } },
   });
 
   const stockMovements = await prisma.stockMovement.findMany({
-    where: { productId: QA_PRODUCT_ID },
+    where: { companyId: cid, productId: QA_PRODUCT_ID },
     select: { id: true, type: true, quantity: true },
   });
 
@@ -98,29 +109,29 @@ const apply = process.argv.includes('--apply');
   }
 
   const deletedNotifications = await prisma.notification.deleteMany({
-    where: { id: { in: notifications.map((n) => n.id) } },
+    where: { companyId: cid, id: { in: notifications.map((n) => n.id) } },
   });
 
   let deletedCommissions = 0;
   for (const p of payments) {
-    const res = await prisma.commission.deleteMany({ where: { paymentId: p.id } });
+    const res = await prisma.commission.deleteMany({ where: { companyId: cid, paymentId: p.id } });
     deletedCommissions += res.count;
   }
 
   const deletedPayments = await prisma.payment.deleteMany({
-    where: { id: { in: payments.map((p) => p.id) } },
+    where: { companyId: cid, id: { in: payments.map((p) => p.id) } },
   });
 
   const deletedAppointments = await prisma.appointment.deleteMany({
-    where: { id: QA_APPOINTMENT_ID },
+    where: { companyId: cid, id: QA_APPOINTMENT_ID },
   });
 
   const deletedStockMovements = await prisma.stockMovement.deleteMany({
-    where: { productId: QA_PRODUCT_ID },
+    where: { companyId: cid, productId: QA_PRODUCT_ID },
   });
 
   const deletedProducts = await prisma.product.deleteMany({
-    where: { id: QA_PRODUCT_ID },
+    where: { companyId: cid, id: QA_PRODUCT_ID },
   });
 
   console.log(

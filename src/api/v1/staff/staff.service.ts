@@ -65,19 +65,20 @@ export class StaffService {
   /**
    * Criar um novo profissional
    */
-  async create(data: CreateStaffDTO): Promise<Staff> {
+  async create(data: CreateStaffDTO, companyId: string): Promise<Staff> {
     // Elegibilidade: usuário existe, está ativo e tem cargo (qualquer).
-    // (frontend só filtra client-side — a decisão final é do backend)
-    const user = await prisma.user.findUnique({
-      where: { id: data.userId },
+    // 0B.1: além disso, precisa pertencer à mesma empresa de quem cria —
+    // findFirst com companyId impede perfil de staff cross-tenant.
+    const user = await prisma.user.findFirst({
+      where: { id: data.userId, companyId },
       include: { role: { select: { name: true } } },
     });
 
     assertStaffProfileEligibility(user);
 
     // Verifica se o usuário já tem perfil de staff
-    const existingStaff = await prisma.staff.findUnique({
-      where: { userId: data.userId },
+    const existingStaff = await prisma.staff.findFirst({
+      where: { userId: data.userId, companyId },
     });
 
     if (existingStaff) {
@@ -87,6 +88,7 @@ export class StaffService {
     const staff = await prisma.staff.create({
       data: {
         userId: data.userId,
+        companyId,
         specialties: data.specialties,
         commissionType: data.commissionType || CommissionType.PERCENT,
         commissionValue: data.commissionValue || 0,
@@ -112,11 +114,12 @@ export class StaffService {
     await notifyResource(
       {
         type: NotificationType.NEW_STAFF,
-        message: `Novo profissional cadastrado: ${staff.user.name}`,
+        message: `Novo profissional cadastrado: ${user!.name}`,
         link: `/staff/${staff.id}`,
         dedupeKey: `NEW_STAFF:${staff.id}`,
       },
-      { roleNames: ['Admin'] }
+      { roleNames: ['Admin'] },
+      companyId
     );
 
     return staff;
@@ -127,8 +130,9 @@ export class StaffService {
    * Lista usuários ativos com cargo; quem não tem perfil de staff vem com
    * hasProfile=false e sem campos de perfil.
    */
-  async list(filters: StaffFilters = {}): Promise<StaffListItem[]> {
+  async list(filters: StaffFilters = {}, companyId: string): Promise<StaffListItem[]> {
     const where: any = {
+      companyId,
       isActive: true,
       roleId: { not: null },
     };
@@ -197,9 +201,9 @@ export class StaffService {
   /**
    * Buscar profissional por ID
    */
-  async getById(id: string): Promise<Staff | null> {
-    return await prisma.staff.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Staff | null> {
+    return await prisma.staff.findFirst({
+      where: { id, companyId },
       include: {
         user: {
           select: {
@@ -224,7 +228,9 @@ export class StaffService {
   /**
    * Atualizar profissional
    */
-  async update(id: string, data: UpdateStaffDTO): Promise<Staff> {
+  async update(id: string, data: UpdateStaffDTO, companyId: string): Promise<Staff> {
+    if (!await this.getById(id, companyId)) throw new AppError('Staff not found', 404);
+
     return await prisma.staff.update({
       where: { id },
       data,
@@ -245,7 +251,9 @@ export class StaffService {
   /**
    * Deletar profissional
    */
-  async delete(id: string): Promise<Staff> {
+  async delete(id: string, companyId: string): Promise<Staff> {
+    if (!await this.getById(id, companyId)) throw new AppError('Staff not found', 404);
+
     return await prisma.staff.update({
       where: { id },
       data: { isAvailable: false },
@@ -258,7 +266,7 @@ export class StaffService {
   /**
    * Verificar disponibilidade do profissional em uma data
    */
-  async checkAvailability(staffId: string, date: Date) {
+  async checkAvailability(staffId: string, date: Date, companyId: string) {
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
     
@@ -269,6 +277,7 @@ export class StaffService {
     const appointments = await prisma.appointment.findMany({
       where: {
         staffId,
+        companyId,
         startTime: {
           gte: startOfDay,
           lte: endOfDay,
@@ -288,8 +297,8 @@ export class StaffService {
     });
 
     // Buscar horário de trabalho do profissional
-    const staff = await prisma.staff.findUnique({
-      where: { id: staffId },
+    const staff = await prisma.staff.findFirst({
+      where: { id: staffId, companyId },
       select: {
         workSchedule: true,
         blockedDates: true,
@@ -307,9 +316,9 @@ export class StaffService {
   /**
    * Obter horário de trabalho do profissional
    */
-  async getSchedule(staffId: string) {
-    const staff = await prisma.staff.findUnique({
-      where: { id: staffId },
+  async getSchedule(staffId: string, companyId: string) {
+    const staff = await prisma.staff.findFirst({
+      where: { id: staffId, companyId },
       select: {
         workSchedule: true,
         blockedDates: true,
@@ -324,10 +333,10 @@ export class StaffService {
    * Paridade de contrato com POST /roles/:roleId/assign/:userId:
    * staff/cargo inexistente → 404; cargo inativo → 400.
    */
-  async assignRole(staffId: string, roleId: string) {
+  async assignRole(staffId: string, roleId: string, companyId: string) {
     // Verificar se o staff existe
-    const staff = await prisma.staff.findUnique({
-      where: { id: staffId },
+    const staff = await prisma.staff.findFirst({
+      where: { id: staffId, companyId },
       include: { user: true },
     });
 

@@ -4,6 +4,14 @@
 const { PrismaClient } = await import('@prisma/client');
 const prisma = new PrismaClient();
 const API = 'http://localhost:4000/api/v1';
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+// 0B.1: fail-closed — sem empresa resolvida, nenhum delete de fixture roda.
+async function tenantId() {
+  const company = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (!company) throw new Error(`[gate] Empresa "${COMPANY_NAME}" não encontrada — abortando.`);
+  return company.id;
+}
 
 async function login(email, password) {
   const res = await fetch(`${API}/auth/login`, {
@@ -180,14 +188,15 @@ const asItems = (res) => (Array.isArray(res.body?.data) ? res.body.data : []);
   } finally {
     // Ordem de FK: notificação (user SetNull) → usuário. Fixture não tem perfil.
     if (fixtureId) {
-      await prisma.notification.deleteMany({ where: { type: 'NEW_USER', message: { contains: email } } });
-      const del = await prisma.user.deleteMany({ where: { id: fixtureId } });
+      const cid = await tenantId();
+      await prisma.notification.deleteMany({ where: { companyId: cid, type: 'NEW_USER', message: { contains: email } } });
+      const del = await prisma.user.deleteMany({ where: { companyId: cid, id: fixtureId } });
       pass(del.count > 0, 'cleanup removeu o fixture', `fixture=${fixtureId} count=${del.count}`);
     }
   }
 
   // Resíduo: nenhum fixture DESTE run pode sobrar no banco.
-  const residue = await prisma.user.count({ where: { email } });
+  const residue = await prisma.user.count({ where: { companyId: await tenantId(), email } });
   pass(residue === 0, 'resíduo: fixture verify.list removido do banco', `residue=${residue}`);
 
   console.log(`\nFALHAS: ${fails}`);

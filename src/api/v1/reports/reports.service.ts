@@ -10,6 +10,7 @@ export class ReportsService {
     const [appointments, payments, expenses, clients] = await Promise.all([
       prisma.appointment.count({
         where: {
+          companyId,
           createdAt: { gte: startDate, lte: endDate },
         },
       }),
@@ -32,6 +33,7 @@ export class ReportsService {
       }),
       prisma.client.count({
         where: {
+          companyId,
           createdAt: { gte: startDate, lte: endDate },
         },
       }),
@@ -142,6 +144,7 @@ export class ReportsService {
           COALESCE(SUM(amount), 0)::float as revenue
         FROM payments
         WHERE status = 'PAID'
+        AND "companyId" = ${companyId}
         AND paid_at >= ${startDate}
         AND paid_at <= ${endDate}
         GROUP BY DATE(paid_at)
@@ -152,6 +155,7 @@ export class ReportsService {
           COALESCE(SUM(amount), 0)::float as despesas
         FROM expenses
         WHERE is_paid = true
+        AND "companyId" = ${companyId}
         AND paid_date >= ${startDate}
         AND paid_date <= ${endDate}
         GROUP BY DATE(paid_date)
@@ -235,10 +239,11 @@ export class ReportsService {
   /**
    * Serviços Mais Lucrativos
    */
-  async getMostProfitableServices(startDate: Date, endDate: Date) {
+  async getMostProfitableServices(startDate: Date, endDate: Date, companyId: string) {
     // Buscar agendamentos pagos do período
     const appointments = await prisma.appointment.findMany({
       where: {
+        companyId,
         status: 'COMPLETED',
         isPaid: true,
         createdAt: { gte: startDate, lte: endDate },
@@ -299,9 +304,10 @@ export class ReportsService {
     const [revenueByPeriod, revenueByMethod, profitableServices, commissions] = await Promise.all([
       this.getRevenueByPeriod(startDate, endDate, companyId),
       this.getRevenueByPaymentMethod(startDate, endDate, companyId),
-      this.getMostProfitableServices(startDate, endDate),
+      this.getMostProfitableServices(startDate, endDate, companyId),
       prisma.commission.aggregate({
         where: {
+          companyId,
           createdAt: { gte: startDate, lte: endDate },
         },
         _sum: { amount: true },
@@ -334,12 +340,13 @@ export class ReportsService {
   /**
    * Estatísticas de Agendamentos
    */
-  async getAppointmentsStats(startDate: Date, endDate: Date) {
+  async getAppointmentsStats(startDate: Date, endDate: Date, companyId: string) {
     const [statusStats, hourlyDistribution, staffPerformance] = await Promise.all([
       // Agendamentos por status
       prisma.appointment.groupBy({
         by: ['status'],
         where: {
+          companyId,
           startTime: { gte: startDate, lte: endDate },
         },
         _count: true,
@@ -350,7 +357,8 @@ export class ReportsService {
           EXTRACT(HOUR FROM start_time)::int as hour,
           COUNT(*)::int as count
         FROM appointments
-        WHERE start_time >= ${startDate}
+        WHERE "companyId" = ${companyId}
+        AND start_time >= ${startDate}
         AND start_time <= ${endDate}
         GROUP BY EXTRACT(HOUR FROM start_time)
         ORDER BY hour
@@ -359,6 +367,7 @@ export class ReportsService {
       prisma.appointment.groupBy({
         by: ['staffId'],
         where: {
+          companyId,
           startTime: { gte: startDate, lte: endDate },
           status: { in: ['COMPLETED', 'CONFIRMED', 'IN_PROGRESS'] },
         },
@@ -377,7 +386,7 @@ export class ReportsService {
     // Buscar detalhes dos profissionais
     const staffIds = staffPerformance.map(s => s.staffId);
     const staffDetails = await prisma.staff.findMany({
-      where: { id: { in: staffIds } },
+      where: { id: { in: staffIds }, companyId },
       include: {
         user: { select: { name: true } },
       },
@@ -420,13 +429,14 @@ export class ReportsService {
   /**
    * Taxa de Ocupação
    */
-  async getOccupancyRate(startDate: Date, endDate: Date) {
+  async getOccupancyRate(startDate: Date, endDate: Date, companyId: string) {
     const staff = await prisma.staff.findMany({
-      where: { isAvailable: true },
+      where: { companyId, isAvailable: true },
       include: {
         user: { select: { name: true } },
         appointments: {
           where: {
+            companyId,
             startTime: { gte: startDate, lte: endDate },
             status: { notIn: ['CANCELLED', 'NO_SHOW'] },
           },
@@ -480,10 +490,11 @@ export class ReportsService {
   /**
    * Produtos Mais Vendidos
    */
-  async getTopSellingProducts(startDate: Date, endDate: Date) {
+  async getTopSellingProducts(startDate: Date, endDate: Date, companyId: string) {
     const sales = await prisma.saleItem.groupBy({
       by: ['productId'],
       where: {
+        companyId,
         sale: {
           createdAt: { gte: startDate, lte: endDate },
           paymentStatus: 'PAID',
@@ -498,7 +509,7 @@ export class ReportsService {
 
     const productIds = sales.map(s => s.productId);
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds } },
+      where: { id: { in: productIds }, companyId },
       select: {
         id: true,
         name: true,
@@ -547,10 +558,11 @@ export class ReportsService {
   /**
    * Estoque Crítico
    */
-  async getLowStockProducts() {
+  async getLowStockProducts(companyId: string) {
     // Buscar todos os produtos ativos
     const products = await prisma.product.findMany({
       where: {
+        companyId,
         isActive: true,
       },
       select: {
@@ -592,9 +604,10 @@ export class ReportsService {
   /**
    * Análise de Movimentação de Estoque
    */
-  async getStockMovementAnalysis(startDate: Date, endDate: Date) {
+  async getStockMovementAnalysis(startDate: Date, endDate: Date, companyId: string) {
     const movements = await prisma.stockMovement.findMany({
       where: {
+        companyId,
         createdAt: { gte: startDate, lte: endDate },
       },
       include: {
@@ -659,14 +672,16 @@ export class ReportsService {
       // Novos clientes no período
       prisma.client.count({
         where: {
+          companyId,
           createdAt: { gte: startDate, lte: endDate },
         },
       }),
       // Total de clientes
-      prisma.client.count(),
+      prisma.client.count({ where: { companyId } }),
       // Clientes ativos (com agendamentos no período)
       prisma.client.count({
         where: {
+          companyId,
           appointments: {
             some: {
               startTime: { gte: startDate, lte: endDate },
@@ -699,7 +714,7 @@ export class ReportsService {
     // Buscar detalhes dos top clientes
     const clientIds = topClients.map(c => c.clientId);
     const clientDetails = await prisma.client.findMany({
-      where: { id: { in: clientIds } },
+      where: { id: { in: clientIds }, companyId },
       select: {
         id: true,
         name: true,
@@ -740,12 +755,13 @@ export class ReportsService {
   /**
    * Clientes Inativos para Reativação
    */
-  async getInactiveClients(daysInactive: number = 60) {
+  async getInactiveClients(daysInactive: number = 60, companyId: string) {
     const inactiveDate = new Date();
     inactiveDate.setDate(inactiveDate.getDate() - daysInactive);
 
     const inactiveClients = await prisma.client.findMany({
       where: {
+        companyId,
         isBlocked: false,
         appointments: {
           none: {
@@ -764,7 +780,7 @@ export class ReportsService {
           },
         },
         payments: {
-          where: { status: 'PAID' },
+          where: { companyId, status: 'PAID' },
           select: {
             amount: true,
           },
@@ -806,9 +822,10 @@ export class ReportsService {
   /**
    * Análise de Fidelidade
    */
-  async getLoyaltyAnalysis() {
+  async getLoyaltyAnalysis(companyId: string) {
     const clients = await prisma.client.findMany({
       where: {
+        companyId,
         loyaltyPoints: { gt: 0 },
       },
       select: {
@@ -830,6 +847,7 @@ export class ReportsService {
     });
 
     const totalPoints = await prisma.client.aggregate({
+      where: { companyId },
       _sum: { loyaltyPoints: true },
     });
 
@@ -853,8 +871,8 @@ export class ReportsService {
   // COMISSÕES (Mantido do código original)
   // =============================================
   
-  async getCommissions(staffId?: string, startDate?: Date, endDate?: Date) {
-    const where: any = {};
+  async getCommissions(companyId: string, staffId?: string, startDate?: Date, endDate?: Date) {
+    const where: any = { companyId };
     if (staffId) where.staffId = staffId;
     if (startDate || endDate) {
       where.createdAt = {};

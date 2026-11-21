@@ -26,7 +26,8 @@ export const crossedLowStock = (
  */
 export const notifyLowStock = async (
   product: LowStockProduct,
-  eventId: string
+  eventId: string,
+  companyId: string
 ): Promise<void> => {
   await notifyResource(
     {
@@ -35,6 +36,7 @@ export const notifyLowStock = async (
       link: `/products/${product.id}`,
       dedupeKey: `LOW_STOCK:${product.id}:${eventId}`,
     },
-    { roleNames: ['Admin', 'Recepção'] }
+    { roleNames: ['Admin', 'Recepção'] },
+    companyId
   );
 };

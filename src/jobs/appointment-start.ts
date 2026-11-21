@@ -38,13 +38,15 @@ export const appointmentStartDedupeKey = (appointmentId: string, startTime: Date
  * Destinatários do aviso: profissional do agendamento + Admin + Recepção.
  */
 export const resolveAppointmentStartRecipients = async (
-  staffUserId?: string | null
+  staffUserId: string | null | undefined,
+  companyId: string
 ): Promise<string[]> => {
   const or: Array<Record<string, any>> = [{ role: { name: { in: ['Admin', 'Recepção'] } } }];
   if (staffUserId) or.push({ id: staffUserId });
 
   const users = await prisma.user.findMany({
     where: {
+      companyId,
       isActive: true,
       OR: or,
     },
@@ -56,6 +58,7 @@ export const resolveAppointmentStartRecipients = async (
 
 interface SchedulableAppointment {
   id: string;
+  companyId: string;
   startTime: Date;
   client: { name: string };
   staff: { userId: string };
@@ -80,6 +83,7 @@ export const scheduleAppointmentStart = async (
     await addAppointmentStartJob(
       {
         appointmentId: appointment.id,
+        companyId: appointment.companyId,
         message: appointmentStartMessage(appointment.client.name, appointment.startTime),
         link: `/appointments/${appointment.id}`,
         startTime: new Date(appointment.startTime).toISOString(),
@@ -113,7 +117,7 @@ export const runAppointmentStartReconcile = async (): Promise<void> => {
     });
 
     for (const appointment of overdue) {
-      const userIds = await resolveAppointmentStartRecipients(appointment.staff.userId);
+      const userIds = await resolveAppointmentStartRecipients(appointment.staff.userId, appointment.companyId);
       if (userIds.length === 0) continue;
 
       await notifyUsers(userIds, {
@@ -122,7 +126,7 @@ export const runAppointmentStartReconcile = async (): Promise<void> => {
         appointmentId: appointment.id,
         link: `/appointments/${appointment.id}`,
         dedupeKey: appointmentStartDedupeKey(appointment.id, appointment.startTime),
-      });
+      }, appointment.companyId);
     }
 
     // 2) Futuros → garante que o job exista na fila.
@@ -150,6 +154,7 @@ export const runAppointmentStartReconcile = async (): Promise<void> => {
 
         await scheduleAppointmentStart({
           id: appointment.id,
+          companyId: appointment.companyId,
           startTime: appointment.startTime,
           client: appointment.client,
           staff: appointment.staff,

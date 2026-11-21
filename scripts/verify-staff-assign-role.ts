@@ -33,6 +33,16 @@ import { PrismaClient } from '@prisma/client';
 
 const API = 'http://localhost:4000/api/v1';
 const prisma = new PrismaClient();
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+/** 0B.1: fail-closed — sem empresa resolvida, nenhum delete de fixture roda. */
+async function tenantId(): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (!company) throw new Error(`[gate] Empresa "${COMPANY_NAME}" não encontrada — abortando.`);
+  return company.id;
+}
+/** Resolvida no início do gate; usada também nos helpers síncronos de marcador. */
+let tenantCid: string;
 
 async function login(email: string, password: string): Promise<string> {
   const res = await fetch(`${API}/auth/login`, {
@@ -77,6 +87,7 @@ const GATE_ROLE_PREFIX = 'Verify Inativo';
 // do fixture; NEW_STAFF cita o NOME do fixture (`Verify Profissional <stamp>`).
 // Cobre também o 2º admin do seed (a API lista só as do admin logado).
 const gateNotifWhere = (extra: any[] = []): any => ({
+  companyId: tenantCid,
   OR: [
     { type: 'NEW_USER', message: { contains: GATE_USER_PREFIX } },
     { type: 'NEW_STAFF', message: { contains: NEW_STAFF_MARKER } },
@@ -86,9 +97,11 @@ const gateNotifWhere = (extra: any[] = []): any => ({
 
 // Contagem de resíduo do gate (usuários, perfil, cargos, notificações).
 const gateResidue = async () => ({
-  users: await prisma.user.count({ where: { email: { startsWith: GATE_USER_PREFIX } } }),
+  users: await prisma.user.count({
+    where: { companyId: tenantCid, email: { startsWith: GATE_USER_PREFIX } },
+  }),
   staff: await prisma.staff.count({
-    where: { user: { email: { startsWith: GATE_USER_PREFIX } } },
+    where: { companyId: tenantCid, user: { email: { startsWith: GATE_USER_PREFIX } } },
   }),
   roles: await prisma.role.count({ where: { name: { startsWith: GATE_ROLE_PREFIX } } }),
   notif: await prisma.notification.count({ where: gateNotifWhere() }),
@@ -102,6 +115,7 @@ const gateResidue = async () => ({
   };
 
   const token = await login('admin@salao.com', 'admin123');
+  tenantCid = await tenantId();
 
   const profissionalRole = await prisma.role.findFirst({ where: { name: 'Profissional' } });
   if (!profissionalRole) {
@@ -143,7 +157,7 @@ const gateResidue = async () => ({
     });
     await staleStep('usuários verify.assign.*', async () => {
       const r = await prisma.user.deleteMany({
-        where: { email: { startsWith: GATE_USER_PREFIX } },
+        where: { companyId: tenantCid, email: { startsWith: GATE_USER_PREFIX } },
       });
       return `usuários removidos | count=${r.count}`;
     });
@@ -395,11 +409,11 @@ const gateResidue = async () => ({
     //    assign-role valida cargo ativo e dependeria do backend no ar)
     if (proUserId) {
       await step('restaura cargo do fixture', async () => {
-        const restore = await prisma.user.update({
-          where: { id: proUserId },
+        const restore = await prisma.user.updateMany({
+          where: { companyId: tenantCid, id: proUserId },
           data: { roleId: profissionalRole.id },
         });
-        return `cargo do fixture restaurado | roleId=${restore.roleId}`;
+        return `cargo do fixture restaurado | linhas=${restore.count}`;
       });
     }
 
@@ -417,7 +431,7 @@ const gateResidue = async () => ({
     // 4) usuários do fixture (cascade remove o perfil de staff)
     await step('remove usuários verify.assign.*', async () => {
       const users = await prisma.user.deleteMany({
-        where: { email: { startsWith: GATE_USER_PREFIX } },
+        where: { companyId: tenantCid, email: { startsWith: GATE_USER_PREFIX } },
       });
       return `usuários verify.assign.* removidos | count=${users.count}`;
     });

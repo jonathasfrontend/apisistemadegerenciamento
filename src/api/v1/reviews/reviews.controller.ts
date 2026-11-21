@@ -11,7 +11,7 @@ export class ReviewsController {
 
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const review = await this.reviewsService.create(req.body);
+      const review = await this.reviewsService.create(req.body, req.user!.companyId);
       logger.info(`Review created: ${review.id}`);
       res.status(201).json({ status: 'success', data: { review } });
     } catch (error: any) {
@@ -23,7 +23,7 @@ export class ReviewsController {
   list = async (req: Request, res: Response): Promise<void> => {
     try {
       const { clientId } = req.query;
-      const reviews = await this.reviewsService.list(clientId as string);
+      const reviews = await this.reviewsService.list(req.user!.companyId, clientId as string);
       res.json({ status: 'success', data: reviews });
     } catch (error: any) {
       logger.error('Error listing reviews:', error);
@@ -31,9 +31,9 @@ export class ReviewsController {
     }
   };
 
-  getStats = async (_req: Request, res: Response): Promise<void> => {
+  getStats = async (req: Request, res: Response): Promise<void> => {
     try {
-      const stats = await this.reviewsService.getStats();
+      const stats = await this.reviewsService.getStats(req.user!.companyId);
       res.json({ status: 'success', data: stats });
     } catch (error: any) {
       logger.error('Error getting stats:', error);

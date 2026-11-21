@@ -6,7 +6,7 @@ const clientService = new ClientService();
 
 export const createClient = asyncHandler(
   async (req: Request, res: Response) => {
-    const client = await clientService.create(req.body);
+    const client = await clientService.create(req.body, req.user!.companyId);
 
     res.status(201).json({
       status: 'success',
@@ -24,7 +24,7 @@ export const getClients = asyncHandler(
       limit: limit ? parseInt(limit as string) : undefined,
       search: search as string,
       isBlocked: isBlocked === 'true' ? true : isBlocked === 'false' ? false : undefined,
-    });
+    }, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -35,7 +35,7 @@ export const getClients = asyncHandler(
 
 export const getClient = asyncHandler(
   async (req: Request, res: Response) => {
-    const client = await clientService.findById(req.params.id);
+    const client = await clientService.findById(req.params.id, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -49,8 +49,8 @@ export const getClient = asyncHandler(
  * O arquivo é gerado no servidor — o cliente não monta o CSV.
  */
 export const exportClients = asyncHandler(
-  async (_req: Request, res: Response) => {
-    const { csv, count } = await clientService.exportCsv();
+  async (req: Request, res: Response) => {
+    const { csv, count } = await clientService.exportCsv(req.user!.companyId);
     const filename = `clientes-${new Date().toISOString().slice(0, 10)}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -62,7 +62,7 @@ export const exportClients = asyncHandler(
 
 export const updateClient = asyncHandler(
   async (req: Request, res: Response) => {
-    const client = await clientService.update(req.params.id, req.body);
+    const client = await clientService.update(req.params.id, req.body, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -73,7 +73,7 @@ export const updateClient = asyncHandler(
 
 export const deleteClient = asyncHandler(
   async (req: Request, res: Response) => {
-    await clientService.delete(req.params.id);
+    await clientService.delete(req.params.id, req.user!.companyId);
 
     res.status(204).send();
   }
@@ -93,7 +93,7 @@ export const getClientHistory = asyncHandler(
 export const getInactiveClients = asyncHandler(
   async (req: Request, res: Response) => {
     const days = req.query.days ? parseInt(req.query.days as string) : 60;
-    const clients = await clientService.getInactiveClients(days);
+    const clients = await clientService.getInactiveClients(days, req.user!.companyId);
 
     res.json({
       status: 'success',

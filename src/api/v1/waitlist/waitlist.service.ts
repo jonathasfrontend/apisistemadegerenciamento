@@ -1,5 +1,6 @@
 import { Waitlist } from '@prisma/client';
 import { createPrismaClient } from '../../../config/db';
+import { AppError } from '../../../middlewares/error.handler';
 
 const prisma = createPrismaClient();
 
@@ -12,48 +13,59 @@ interface CreateWaitlistDTO {
 }
 
 export class WaitlistService {
-  async create(data: CreateWaitlistDTO): Promise<Waitlist> {
+  // 0B.1: toda query é escopada por companyId.
+  async create(data: CreateWaitlistDTO, companyId: string): Promise<Waitlist> {
+    const service = await prisma.service.findFirst({
+      where: { id: data.serviceId, companyId },
+      select: { id: true },
+    });
+    if (!service) throw new AppError('Service not found', 404);
+
     return await prisma.waitlist.create({
       data: {
-        clientName: data.clientName,
-        clientPhone: data.clientPhone,
-        serviceId: data.serviceId,
-        preferredDate: data.preferredDate,
-        notes: data.notes,
+        ...data,
+        companyId,
       },
     });
   }
 
-  async list(isContacted?: boolean): Promise<Waitlist[]> {
+  async list(companyId: string, isContacted?: boolean): Promise<Waitlist[]> {
     return await prisma.waitlist.findMany({
-      where: isContacted !== undefined ? { isContacted } : undefined,
-      orderBy: {
-        createdAt: 'asc',
+      where: {
+        companyId,
+        ...(isContacted !== undefined ? { isContacted } : {}),
       },
+      orderBy: { createdAt: 'asc' },
     });
   }
 
-  async getById(id: string): Promise<Waitlist | null> {
-    return await prisma.waitlist.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Waitlist | null> {
+    return await prisma.waitlist.findFirst({
+      where: { id, companyId },
     });
   }
 
-  async update(id: string, data: { isContacted?: boolean; notes?: string }): Promise<Waitlist> {
+  async update(id: string, data: { isContacted?: boolean; notes?: string }, companyId: string): Promise<Waitlist> {
+    if (!await this.getById(id, companyId)) throw new AppError('Waitlist entry not found', 404);
+
     return await prisma.waitlist.update({
       where: { id },
       data,
     });
   }
 
-  async markAsContacted(id: string): Promise<Waitlist> {
+  async markAsContacted(id: string, companyId: string): Promise<Waitlist> {
+    if (!await this.getById(id, companyId)) throw new AppError('Waitlist entry not found', 404);
+
     return await prisma.waitlist.update({
       where: { id },
       data: { isContacted: true },
     });
   }
 
-  async delete(id: string): Promise<Waitlist> {
+  async delete(id: string, companyId: string): Promise<Waitlist> {
+    if (!await this.getById(id, companyId)) throw new AppError('Waitlist entry not found', 404);
+
     return await prisma.waitlist.delete({
       where: { id },
     });

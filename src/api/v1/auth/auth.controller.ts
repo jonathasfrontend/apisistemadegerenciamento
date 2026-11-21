@@ -36,7 +36,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
 
-  await authService.logout(refreshToken);
+  await authService.logout(refreshToken, req.user?.companyId);
 
   res.json({
     status: 'success',

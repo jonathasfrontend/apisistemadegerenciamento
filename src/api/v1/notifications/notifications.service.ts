@@ -25,16 +25,19 @@ interface NotifyTarget {
 /**
  * Cria a notificação in-app para cada usuário alvo.
  * Best-effort: falha nunca propaga para quem chamou.
+ * 0B.1: companyId é obrigatório — notificação nunca cruza a fronteira do tenant.
  */
 async function createNotifications(
   users: { id: string; email: string }[],
-  payload: NotifyPayload
+  payload: NotifyPayload,
+  companyId: string
 ): Promise<void> {
   if (users.length === 0) return;
 
   await prisma.notification.createMany({
     data: users.map((u) => ({
       userId: u.id,
+      companyId,
       appointmentId: payload.appointmentId,
       link: payload.link,
       dedupeKey: payload.dedupeKey,
@@ -49,62 +52,54 @@ async function createNotifications(
   });
 }
 
-/**
- * Notifica usuários específicos (ex.: o profissional do agendamento).
- * Usuários inativos não recebem.
- */
+/** Notifica usuários específicos. Usuários inativos não recebem. */
 export async function notifyUsers(
   userIds: string[],
-  payload: NotifyPayload
+  payload: NotifyPayload,
+  companyId: string
 ): Promise<void> {
   try {
     const ids = [...new Set(userIds.filter(Boolean))];
     if (ids.length === 0) return;
 
     const users = await prisma.user.findMany({
-      where: { id: { in: ids }, isActive: true },
+      where: { id: { in: ids }, isActive: true, companyId },
       select: { id: true, email: true },
     });
 
-    await createNotifications(users, payload);
+    await createNotifications(users, payload, companyId);
   } catch (error) {
-    // Notificação é best-effort: logar e seguir
     console.error('[notifications] Falha ao criar notificações:', error);
   }
 }
 
-/**
- * Cria uma notificação in-app para todos os usuários ativos cujo role
- * esteja na lista informada. Falha nunca deve quebrar o fluxo principal.
- */
+/** Notifica todos os usuários ativos cujo role esteja na lista informada. */
 export async function notifyRoles(
   roleNames: string[],
-  payload: NotifyPayload
+  payload: NotifyPayload,
+  companyId: string
 ): Promise<void> {
   try {
     const users = await prisma.user.findMany({
       where: {
         isActive: true,
+        companyId,
         role: { name: { in: roleNames } },
       },
       select: { id: true, email: true },
     });
 
-    await createNotifications(users, payload);
+    await createNotifications(users, payload, companyId);
   } catch (error) {
-    // Notificação é best-effort: logar e seguir
-    // (logger importado dinamicamente evita ciclo de import)
     console.error('[notifications] Falha ao criar notificações:', error);
   }
 }
 
-/**
- * Notifica a união de destinatários explícitos (`userIds`) e por role
- * (`roleNames`). Sem nenhum dos dois, não faz nada.
- */
+/** Notifica a união de destinatários explícitos e por role. */
 export async function notifyResource(
   payload: NotifyPayload,
-  targets: NotifyTarget
+  targets: NotifyTarget,
+  companyId: string
 ): Promise<void> {
   try {
     const ids = new Set((targets.userIds ?? []).filter(Boolean));
@@ -113,6 +108,7 @@ export async function notifyResource(
       const roleUsers = await prisma.user.findMany({
         where: {
           isActive: true,
+          companyId,
           role: { name: { in: targets.roleNames } },
         },
         select: { id: true },
@@ -120,19 +116,20 @@ export async function notifyResource(
       roleUsers.forEach((u) => ids.add(u.id));
     }
 
-    await notifyUsers([...ids], payload);
+    await notifyUsers([...ids], payload, companyId);
   } catch (error) {
     console.error('[notifications] Falha ao notificar recurso:', error);
   }
 }
 
 export class NotificationsService {
-  async list(userId: string, page = 1, limit = 20) {
+  async list(userId: string, companyId: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
+    const where = { userId, companyId };
 
     const [notifications, total] = await Promise.all([
       prisma.notification.findMany({
-        where: { userId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
@@ -148,21 +145,21 @@ export class NotificationsService {
           createdAt: true,
         },
       }),
-      prisma.notification.count({ where: { userId } }),
+      prisma.notification.count({ where }),
     ]);
 
     return { notifications, total, page, limit };
   }
 
-  async unreadCount(userId: string): Promise<number> {
+  async unreadCount(userId: string, companyId: string): Promise<number> {
     return prisma.notification.count({
-      where: { userId, readAt: null },
+      where: { userId, companyId, readAt: null },
     });
   }
 
-  async markRead(userId: string, id: string): Promise<Notification> {
-    const notification = await prisma.notification.findUnique({
-      where: { id },
+  async markRead(userId: string, id: string, companyId: string): Promise<Notification> {
+    const notification = await prisma.notification.findFirst({
+      where: { id, companyId },
     });
 
     // 404 se não existir OU não pertencer ao usuário (não vazar existência)
@@ -176,9 +173,9 @@ export class NotificationsService {
     });
   }
 
-  async markAllRead(userId: string): Promise<{ count: number }> {
+  async markAllRead(userId: string, companyId: string): Promise<{ count: number }> {
     const result = await prisma.notification.updateMany({
-      where: { userId, readAt: null },
+      where: { userId, companyId, readAt: null },
       data: { readAt: new Date() },
     });
 

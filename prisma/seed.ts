@@ -20,22 +20,25 @@ async function ensureCompany() {
 async function main() {
   console.log('🌱 Seeding database...');
 
-  // Clean database
-  await prisma.auditLog.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.commission.deleteMany();
-  await prisma.payment.deleteMany();
-  await prisma.appointment.deleteMany();
-  await prisma.service.deleteMany();
-  await prisma.staff.deleteMany();
-  await prisma.client.deleteMany();
-  await prisma.refreshToken.deleteMany();
-  await prisma.user.deleteMany();
+  // 0B.1: empresaFirst — o cleanup de fixtures é escopado à empresa do seed.
+  // deleteMany irrestrito apagaria dados de outras empresas num DB multi-tenant.
+  // RBAC (Role/Permission/RolePermission) permanece global, sem companyId.
+  const company = await ensureCompany();
+  const cid = company.id;
+
+  await prisma.auditLog.deleteMany({ where: { companyId: cid } });
+  await prisma.notification.deleteMany({ where: { companyId: cid } });
+  await prisma.commission.deleteMany({ where: { companyId: cid } });
+  await prisma.payment.deleteMany({ where: { companyId: cid } });
+  await prisma.appointment.deleteMany({ where: { companyId: cid } });
+  await prisma.service.deleteMany({ where: { companyId: cid } });
+  await prisma.staff.deleteMany({ where: { companyId: cid } });
+  await prisma.client.deleteMany({ where: { companyId: cid } });
+  await prisma.refreshToken.deleteMany({ where: { companyId: cid } });
+  await prisma.user.deleteMany({ where: { companyId: cid } });
   await prisma.rolePermission.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.role.deleteMany();
-
-  const company = await ensureCompany();
 
   console.log('📋 Creating permissions...');
   
@@ -258,6 +261,7 @@ async function main() {
 
   const staff1 = await prisma.staff.create({
     data: {
+      companyId: cid,
       userId: staff1User.id,
       specialties: ['cabelo', 'maquiagem'],
       commissionType: 'PERCENT',
@@ -287,6 +291,7 @@ async function main() {
 
   const staff2 = await prisma.staff.create({
     data: {
+      companyId: cid,
       userId: staff2User.id,
       specialties: ['unha', 'sobrancelha'],
       commissionType: 'PERCENT',
@@ -305,6 +310,7 @@ async function main() {
   const services = await Promise.all([
     prisma.service.create({
       data: {
+        companyId: cid,
         name: 'Corte Feminino',
         description: 'Corte de cabelo feminino com lavagem e secagem',
         durationMinutes: 60,
@@ -314,6 +320,7 @@ async function main() {
     }),
     prisma.service.create({
       data: {
+        companyId: cid,
         name: 'Corte Masculino',
         description: 'Corte de cabelo masculino',
         durationMinutes: 30,
@@ -323,6 +330,7 @@ async function main() {
     }),
     prisma.service.create({
       data: {
+        companyId: cid,
         name: 'Manicure',
         description: 'Manicure completa',
         durationMinutes: 45,
@@ -332,6 +340,7 @@ async function main() {
     }),
     prisma.service.create({
       data: {
+        companyId: cid,
         name: 'Pedicure',
         description: 'Pedicure completa',
         durationMinutes: 60,
@@ -341,6 +350,7 @@ async function main() {
     }),
     prisma.service.create({
       data: {
+        companyId: cid,
         name: 'Maquiagem',
         description: 'Maquiagem profissional',
         durationMinutes: 90,
@@ -350,6 +360,7 @@ async function main() {
     }),
     prisma.service.create({
       data: {
+        companyId: cid,
         name: 'Design de Sobrancelha',
         description: 'Design e modelagem de sobrancelha',
         durationMinutes: 30,
@@ -363,6 +374,7 @@ async function main() {
   const clients = await Promise.all([
     prisma.client.create({
       data: {
+        companyId: cid,
         name: 'Julia Santos',
         phone: '11955555555',
         email: 'julia@email.com',
@@ -373,6 +385,7 @@ async function main() {
     }),
     prisma.client.create({
       data: {
+        companyId: cid,
         name: 'Carla Oliveira',
         phone: '11944444444',
         email: 'carla@email.com',
@@ -383,6 +396,7 @@ async function main() {
     }),
     prisma.client.create({
       data: {
+        companyId: cid,
         name: 'Pedro Almeida',
         phone: '11933333333',
         email: 'pedro@email.com',
@@ -399,6 +413,7 @@ async function main() {
 
   const appointment = await prisma.appointment.create({
     data: {
+      companyId: cid,
       clientId: clients[0].id,
       staffId: staff1.id,
       startTime: tomorrow,

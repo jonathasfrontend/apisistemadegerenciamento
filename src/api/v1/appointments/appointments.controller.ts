@@ -32,7 +32,7 @@ export const getAppointments = asyncHandler(
       date: date as string,
       startDate: startDate as string,
       endDate: endDate as string,
-    });
+    }, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -43,7 +43,7 @@ export const getAppointments = asyncHandler(
 
 export const getAppointment = asyncHandler(
   async (req: Request, res: Response) => {
-    const appointment = await appointmentService.findById(req.params.id);
+    const appointment = await appointmentService.findById(req.params.id, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -54,7 +54,7 @@ export const getAppointment = asyncHandler(
 
 export const updateAppointment = asyncHandler(
   async (req: Request, res: Response) => {
-    const appointment = await appointmentService.update(req.params.id, req.body);
+    const appointment = await appointmentService.update(req.params.id, req.body, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -65,7 +65,7 @@ export const updateAppointment = asyncHandler(
 
 export const cancelAppointment = asyncHandler(
   async (req: Request, res: Response) => {
-    const appointment = await appointmentService.cancel(req.params.id);
+    const appointment = await appointmentService.cancel(req.params.id, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -76,7 +76,7 @@ export const cancelAppointment = asyncHandler(
 
 export const markNoShow = asyncHandler(
   async (req: Request, res: Response) => {
-    const appointment = await appointmentService.markNoShow(req.params.id);
+    const appointment = await appointmentService.markNoShow(req.params.id, req.user!.companyId);
 
     res.json({
       status: 'success',
@@ -91,7 +91,8 @@ export const checkAvailability = asyncHandler(
 
     const appointments = await appointmentService.checkAvailability(
       staffId as string,
-      date as string
+      date as string,
+      req.user!.companyId
     );
 
     res.json({
@@ -109,7 +110,7 @@ export const getStats = asyncHandler(
       staffId: staffId as string,
       startDate: startDate as string,
       endDate: endDate as string,
-    });
+    }, req.user!.companyId);
 
     res.json({
       status: 'success',

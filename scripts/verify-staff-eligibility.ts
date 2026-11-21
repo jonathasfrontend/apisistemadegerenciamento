@@ -10,6 +10,14 @@ import { PrismaClient } from '@prisma/client';
 
 const API = 'http://localhost:4000/api/v1';
 const prisma = new PrismaClient();
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+/** 0B.1: fail-closed — sem empresa resolvida, nenhum delete de fixture roda. */
+async function tenantId(): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (!company) throw new Error(`[gate] Empresa "${COMPANY_NAME}" não encontrada — abortando.`);
+  return company.id;
+}
 
 let fails = 0;
 const pass = (ok: boolean, label: string, extra = '') => {
@@ -119,15 +127,15 @@ async function req(path: string, token: string, options: Record<string, any> = {
     });
     pass(res.status === 400, 'POST /staff para usuário sem cargo → 400', String(res.status));
     pass(/cargo/i.test(String(res.body?.message ?? '')), 'mensagem cita o cargo', String(res.body?.message ?? ''));
-    const rows = await prisma.staff.count({ where: { userId: noRoleId } });
+    const rows = await prisma.staff.count({ where: { companyId: await tenantId(), userId: noRoleId } });
     pass(rows === 0, 'nenhum perfil criado para usuário sem cargo', `n=${rows}`);
     const listed = await req(`/staff?search=${encodeURIComponent(noRoleEmail)}`, token);
     const listedItems = Array.isArray(listed.body?.data) ? listed.body.data : [];
     pass(!listedItems.some((i: any) => i.user?.email === noRoleEmail),
       'usuário sem cargo NÃO aparece em GET /staff');
   } finally {
-    await prisma.notification.deleteMany({ where: { type: 'NEW_USER', message: { contains: noRoleEmail } } });
-    await prisma.user.deleteMany({ where: { email: noRoleEmail } });
+    await prisma.notification.deleteMany({ where: { companyId: await tenantId(), type: 'NEW_USER', message: { contains: noRoleEmail } } });
+    await prisma.user.deleteMany({ where: { companyId: await tenantId(), email: noRoleEmail } });
   }
 
   // 2b-ii) positivo: usuário COM cargo Recepção → 201 + listado com staff.id real
@@ -151,9 +159,9 @@ async function req(path: string, token: string, options: Record<string, any> = {
     pass(!!item && item.hasProfile === true, 'Recepção perfilado aparece com hasProfile=true');
     pass(!!staffId && item?.id === staffId, 'item perfilado usa staff.id real', `id=${item?.id} staffId=${staffId}`);
   } finally {
-    await prisma.notification.deleteMany({ where: { type: 'NEW_STAFF', message: { contains: 'Verify Recepcao' } } });
-    await prisma.notification.deleteMany({ where: { type: 'NEW_USER', message: { contains: recepEmail } } });
-    await prisma.user.deleteMany({ where: { email: recepEmail } }); // cascade Staff.user apaga o perfil
+    await prisma.notification.deleteMany({ where: { companyId: await tenantId(), type: 'NEW_STAFF', message: { contains: 'Verify Recepcao' } } });
+    await prisma.notification.deleteMany({ where: { companyId: await tenantId(), type: 'NEW_USER', message: { contains: recepEmail } } });
+    await prisma.user.deleteMany({ where: { companyId: await tenantId(), email: recepEmail } }); // cascade Staff.user apaga o perfil
   }
 
   // ---------------------------------------------------------------------
@@ -223,15 +231,16 @@ async function req(path: string, token: string, options: Record<string, any> = {
       );
     } finally {
       // Cleanup: notificações NEW_STAFF + perfil + usuário — só o que o gate criou.
-      const profile = await prisma.staff.findFirst({ where: { userId } });
+      const cid = await tenantId();
+      const profile = await prisma.staff.findFirst({ where: { companyId: cid, userId } });
       if (profile) {
-        await prisma.notification.deleteMany({ where: { dedupeKey: `NEW_STAFF:${profile.id}` } });
-        await prisma.staff.deleteMany({ where: { id: profile.id } });
+        await prisma.notification.deleteMany({ where: { companyId: cid, dedupeKey: `NEW_STAFF:${profile.id}` } });
+        await prisma.staff.deleteMany({ where: { companyId: cid, id: profile.id } });
       }
       await prisma.notification.deleteMany({
-        where: { type: 'NEW_USER', message: { contains: verifyEmail } },
+        where: { companyId: cid, type: 'NEW_USER', message: { contains: verifyEmail } },
       });
-      await prisma.user.deleteMany({ where: { email: verifyEmail } });
+      await prisma.user.deleteMany({ where: { companyId: cid, email: verifyEmail } });
       console.log('CLEANUP | usuário verify.* + perfil + notificação removidos');
     }
   }

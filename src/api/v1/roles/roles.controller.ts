@@ -154,7 +154,7 @@ export class RolesController {
   assignRoleToUser = async (req: Request, res: Response): Promise<void> => {
     try {
       const { roleId, userId } = req.params;
-      const result = await this.rolesService.assignRoleToUser(userId, roleId);
+      const result = await this.rolesService.assignRoleToUser(userId, roleId, req.user!.companyId);
 
       logger.info(`Role ${roleId} assigned to user ${userId} by user ${req.user?.id}`);
 

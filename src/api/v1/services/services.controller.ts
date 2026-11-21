@@ -16,7 +16,7 @@ export class ServicesController {
    */
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const service = await this.servicesService.create(req.body);
+      const service = await this.servicesService.create(req.body, req.user!.companyId);
       
       logger.info(`Service created: ${service.id}`);
       
@@ -52,7 +52,7 @@ export class ServicesController {
         filters.limit = parseLimit(limit);
       }
 
-      const services = await this.servicesService.list(filters);
+      const services = await this.servicesService.list(filters, req.user!.companyId);
       
       res.json({
         status: 'success',
@@ -74,7 +74,7 @@ export class ServicesController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const service = await this.servicesService.getById(id);
+      const service = await this.servicesService.getById(id, req.user!.companyId);
       
       if (!service) {
         res.status(404).json({
@@ -104,7 +104,7 @@ export class ServicesController {
   update = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const service = await this.servicesService.update(id, req.body);
+      const service = await this.servicesService.update(id, req.body, req.user!.companyId);
       
       logger.info(`Service updated: ${id}`);
       
@@ -128,7 +128,7 @@ export class ServicesController {
   delete = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.servicesService.delete(id);
+      await this.servicesService.delete(id, req.user!.companyId);
       
       logger.info(`Service deleted: ${id}`);
       
@@ -149,9 +149,9 @@ export class ServicesController {
    * Listar categorias de serviços
    * GET /api/v1/services/categories
    */
-  listCategories = async (_req: Request, res: Response): Promise<void> => {
+  listCategories = async (req: Request, res: Response): Promise<void> => {
     try {
-      const categories = await this.servicesService.listCategories();
+      const categories = await this.servicesService.listCategories(req.user!.companyId);
       
       res.json({
         status: 'success',

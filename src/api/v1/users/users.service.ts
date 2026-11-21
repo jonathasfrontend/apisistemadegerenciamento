@@ -36,8 +36,8 @@ export class UsersService {
    */
   async create(data: CreateUserDTO, companyId: string): Promise<Omit<User, 'passwordHash'>> {
     // Verificar se o email já existe
-    const existingUser = await prisma.user.findUnique({
-      where: { email: data.email.toLowerCase() },
+    const existingUser = await prisma.user.findFirst({
+      where: { email: data.email.toLowerCase(), companyId },
     });
 
     if (existingUser) { // Email já registrado
@@ -79,7 +79,8 @@ export class UsersService {
         link: '/staff',
         dedupeKey: `NEW_USER:${user.id}`,
       },
-      { roleNames: ['Admin'] }
+      { roleNames: ['Admin'] },
+      companyId
     );
 
     // Remover passwordHash do retorno
@@ -90,8 +91,8 @@ export class UsersService {
   /**
    * Listar usuários com filtros
    */
-  async list(filters: UserFilters = {}): Promise<Omit<User, 'passwordHash'>[]> {
-    const where: any = {};
+  async list(filters: UserFilters = {}, companyId: string): Promise<Omit<User, 'passwordHash'>[]> {
+    const where: any = { companyId };
 
     if (filters.isActive !== undefined) {
       where.isActive = filters.isActive;
@@ -139,9 +140,9 @@ export class UsersService {
   /**
    * Buscar usuário por ID
    */
-  async getById(id: string): Promise<Omit<User, 'passwordHash'> | null> {
-    const user = await prisma.user.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Omit<User, 'passwordHash'> | null> {
+    const user = await prisma.user.findFirst({
+      where: { id, companyId },
       include: {
         role: {
           include: {
@@ -177,10 +178,10 @@ export class UsersService {
   /**
    * Atualizar usuário
    */
-  async update(id: string, data: UpdateUserDTO): Promise<Omit<User, 'passwordHash'>> {
+  async update(id: string, data: UpdateUserDTO, companyId: string): Promise<Omit<User, 'passwordHash'>> {
     // Verificar se o usuário existe
-    const existingUser = await prisma.user.findUnique({
-      where: { id },
+    const existingUser = await prisma.user.findFirst({
+      where: { id, companyId },
     });
 
     if (!existingUser) {
@@ -223,9 +224,9 @@ export class UsersService {
   /**
    * Alterar senha do usuário
    */
-  async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
-    const user = await prisma.user.findUnique({
-      where: { id },
+  async changePassword(id: string, currentPassword: string, newPassword: string, companyId: string): Promise<void> {
+    const user = await prisma.user.findFirst({
+      where: { id, companyId },
     });
 
     if (!user) {
@@ -253,9 +254,9 @@ export class UsersService {
   /**
    * Desativar usuário (soft delete)
    */
-  async deactivate(id: string): Promise<void> {
-    const user = await prisma.user.findUnique({
-      where: { id },
+  async deactivate(id: string, companyId: string): Promise<void> {
+    const user = await prisma.user.findFirst({
+      where: { id, companyId },
     });
 
     if (!user) {
@@ -273,9 +274,9 @@ export class UsersService {
   /**
    * Ativar usuário
    */
-  async activate(id: string): Promise<void> {
-    const user = await prisma.user.findUnique({
-      where: { id },
+  async activate(id: string, companyId: string): Promise<void> {
+    const user = await prisma.user.findFirst({
+      where: { id, companyId },
     });
 
     if (!user) {
@@ -293,9 +294,9 @@ export class UsersService {
   /**
    * Deletar usuário permanentemente
    */
-  async delete(id: string): Promise<void> {
-    const user = await prisma.user.findUnique({
-      where: { id },
+  async delete(id: string, companyId: string): Promise<void> {
+    const user = await prisma.user.findFirst({
+      where: { id, companyId },
     });
 
     if (!user) {

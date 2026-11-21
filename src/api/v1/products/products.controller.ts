@@ -16,7 +16,7 @@ export class ProductsController {
    */
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const product = await this.productsService.create(req.body);
+      const product = await this.productsService.create(req.body, req.user!.companyId);
       
       logger.info(`Product created: ${product.id}`);
       
@@ -53,7 +53,7 @@ export class ProductsController {
         filters.limit = parseLimit(limit);
       }
 
-      const products = await this.productsService.list(filters);
+      const products = await this.productsService.list(filters, req.user!.companyId);
       
       res.json({
         status: 'success',
@@ -75,7 +75,7 @@ export class ProductsController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const product = await this.productsService.getById(id);
+      const product = await this.productsService.getById(id, req.user!.companyId);
       
       if (!product) {
         res.status(404).json({
@@ -105,7 +105,7 @@ export class ProductsController {
   update = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const product = await this.productsService.update(id, req.body);
+      const product = await this.productsService.update(id, req.body, req.user!.companyId);
       
       logger.info(`Product updated: ${id}`);
       
@@ -129,7 +129,7 @@ export class ProductsController {
   delete = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.productsService.delete(id);
+      await this.productsService.delete(id, req.user!.companyId);
       
       logger.info(`Product deleted: ${id}`);
       
@@ -155,7 +155,7 @@ export class ProductsController {
       const { id } = req.params;
       const { quantity, reason, reference } = req.body;
       
-      const product = await this.productsService.addStock(id, quantity, reason, reference);
+      const product = await this.productsService.addStock(id, quantity, req.user!.companyId, reason, reference);
       
       logger.info(`Stock added to product ${id}: +${quantity}`);
       
@@ -181,7 +181,7 @@ export class ProductsController {
       const { id } = req.params;
       const { quantity, reason, reference } = req.body;
       
-      const product = await this.productsService.removeStock(id, quantity, reason, reference);
+      const product = await this.productsService.removeStock(id, quantity, req.user!.companyId, reason, reference);
       
       logger.info(`Stock removed from product ${id}: -${quantity}`);
       
@@ -205,7 +205,7 @@ export class ProductsController {
   getMovements = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const movements = await this.productsService.getMovements(id);
+      const movements = await this.productsService.getMovements(id, req.user!.companyId);
       
       res.json({
         status: 'success',

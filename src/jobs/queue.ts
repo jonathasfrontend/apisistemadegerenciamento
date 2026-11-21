@@ -53,6 +53,8 @@ export interface ReportJob {
  */
 export interface AppointmentStartJob {
   appointmentId: string;
+  /** 0B.1: tenant do agendamento — nunca resolver destinatários fora dele. */
+  companyId: string;
   message: string;
   link: string;
   /** ISO do startTime — parte da chave de dedupe. */

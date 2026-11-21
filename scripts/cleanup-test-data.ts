@@ -12,6 +12,14 @@
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+/** 0B.1: fail-closed — sem empresa resolvida, nenhum delete roda. */
+async function tenantId(): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (!company) throw new Error(`[cleanup] Empresa "${COMPANY_NAME}" não encontrada — abortando.`);
+  return company.id;
+}
 
 const TEST_APPOINTMENT_IDS = [
   'a2e86a36-94f5-48e0-9e23-bb47eceecf0f', // NO_SHOW  (script verify-review-fixes)
@@ -34,8 +42,10 @@ const TEST_CLIENT_COUNTERS = [
 const apply = process.argv.includes('--apply');
 
 (async () => {
+  const cid = await tenantId();
+
   const appointments = await prisma.appointment.findMany({
-    where: { id: { in: TEST_APPOINTMENT_IDS } },
+    where: { companyId: cid, id: { in: TEST_APPOINTMENT_IDS } },
     select: {
       id: true,
       startTime: true,
@@ -47,12 +57,12 @@ const apply = process.argv.includes('--apply');
   });
 
   const notifications = await prisma.notification.findMany({
-    where: { appointmentId: { in: TEST_APPOINTMENT_IDS } },
+    where: { companyId: cid, appointmentId: { in: TEST_APPOINTMENT_IDS } },
     select: { id: true, type: true, appointmentId: true, recipient: true },
   });
 
   const counters = await prisma.client.findMany({
-    where: { id: { in: TEST_CLIENT_COUNTERS.map((c) => c.id) } },
+    where: { companyId: cid, id: { in: TEST_CLIENT_COUNTERS.map((c) => c.id) } },
     select: { id: true, name: true, noShowCount: true, isBlocked: true },
   });
 
@@ -79,18 +89,18 @@ const apply = process.argv.includes('--apply');
   }
 
   const deletedNotifications = await prisma.notification.deleteMany({
-    where: { appointmentId: { in: TEST_APPOINTMENT_IDS } },
+    where: { companyId: cid, appointmentId: { in: TEST_APPOINTMENT_IDS } },
   });
   const deletedPayments = await prisma.payment.deleteMany({
-    where: { appointmentId: { in: TEST_APPOINTMENT_IDS } },
+    where: { companyId: cid, appointmentId: { in: TEST_APPOINTMENT_IDS } },
   });
   const deletedAppointments = await prisma.appointment.deleteMany({
-    where: { id: { in: TEST_APPOINTMENT_IDS } },
+    where: { companyId: cid, id: { in: TEST_APPOINTMENT_IDS } },
   });
 
   for (const c of TEST_CLIENT_COUNTERS) {
-    await prisma.client.update({
-      where: { id: c.id },
+    await prisma.client.updateMany({
+      where: { companyId: cid, id: c.id },
       data: { noShowCount: 0, isBlocked: false },
     });
   }

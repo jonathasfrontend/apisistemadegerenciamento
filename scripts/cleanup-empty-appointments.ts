@@ -11,6 +11,14 @@
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+/** 0B.1: fail-closed — sem empresa resolvida, nenhum delete roda. */
+async function tenantId(): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (!company) throw new Error(`[cleanup] Empresa "${COMPANY_NAME}" não encontrada — abortando.`);
+  return company.id;
+}
 
 const TARGET_APPOINTMENT_IDS = [
   'b4efce29-29b8-4306-8b6d-a1d7a244366b', // 13/11 22:24 local
@@ -22,8 +30,10 @@ const TARGET_APPOINTMENT_IDS = [
 const apply = process.argv.includes('--apply');
 
 (async () => {
+  const cid = await tenantId();
+
   const appointments = await prisma.appointment.findMany({
-    where: { id: { in: TARGET_APPOINTMENT_IDS } },
+    where: { companyId: cid, id: { in: TARGET_APPOINTMENT_IDS } },
     select: {
       id: true,
       status: true,
@@ -35,6 +45,7 @@ const apply = process.argv.includes('--apply');
 
   const notifications = await prisma.notification.findMany({
     where: {
+      companyId: cid,
       OR: [
         { appointmentId: { in: TARGET_APPOINTMENT_IDS } },
         ...TARGET_APPOINTMENT_IDS.map((id) => ({ link: `/appointments/${id}` })),
@@ -44,13 +55,13 @@ const apply = process.argv.includes('--apply');
   });
 
   const payments = await prisma.payment.findMany({
-    where: { appointmentId: { in: TARGET_APPOINTMENT_IDS } },
+    where: { companyId: cid, appointmentId: { in: TARGET_APPOINTMENT_IDS } },
     select: { id: true, status: true, amount: true, _count: { select: { commissions: true } } },
   });
 
   // Órfãs: link aponta para recurso que não existe mais (produto/agendamento).
   const allLinked = await prisma.notification.findMany({
-    where: { link: { not: null } },
+    where: { companyId: cid, link: { not: null } },
     select: { id: true, type: true, link: true, appointmentId: true },
   });
   const orphanCandidates = allLinked.filter((n) => {
@@ -64,19 +75,19 @@ const apply = process.argv.includes('--apply');
     const [, entity, id] = n.link!.match(/^\/(appointments|products)\/([0-9a-f-]{36})$/i)!;
     const exists =
       entity === 'appointments'
-        ? await prisma.appointment.findUnique({ where: { id }, select: { id: true } })
-        : await prisma.product.findUnique({ where: { id }, select: { id: true } });
+        ? await prisma.appointment.findFirst({ where: { id, companyId: cid }, select: { id: true } })
+        : await prisma.product.findFirst({ where: { id, companyId: cid }, select: { id: true } });
     if (!exists) orphanChecked.push(n);
   }
   // Órfãs por appointmentId apagado.
   const orphanByFk = await prisma.notification.findMany({
-    where: { appointmentId: { not: null } },
+    where: { companyId: cid, appointmentId: { not: null } },
     select: { id: true, type: true, link: true, appointmentId: true },
   });
   const orphanFkChecked: typeof orphanByFk = [];
   for (const n of orphanByFk) {
-    const exists = await prisma.appointment.findUnique({
-      where: { id: n.appointmentId! },
+    const exists = await prisma.appointment.findFirst({
+      where: { id: n.appointmentId!, companyId: cid },
       select: { id: true },
     });
     if (!exists) orphanFkChecked.push(n);
@@ -115,21 +126,21 @@ const apply = process.argv.includes('--apply');
   }
 
   const deletedNotifications = await prisma.notification.deleteMany({
-    where: { id: { in: [...notifications, ...orphans].map((n) => n.id) } },
+    where: { companyId: cid, id: { in: [...notifications, ...orphans].map((n) => n.id) } },
   });
 
   let deletedCommissions = 0;
   for (const p of payments) {
-    const res = await prisma.commission.deleteMany({ where: { paymentId: p.id } });
+    const res = await prisma.commission.deleteMany({ where: { companyId: cid, paymentId: p.id } });
     deletedCommissions += res.count;
   }
 
   const deletedPayments = await prisma.payment.deleteMany({
-    where: { id: { in: payments.map((p) => p.id) } },
+    where: { companyId: cid, id: { in: payments.map((p) => p.id) } },
   });
 
   const deletedAppointments = await prisma.appointment.deleteMany({
-    where: { id: { in: TARGET_APPOINTMENT_IDS } },
+    where: { companyId: cid, id: { in: TARGET_APPOINTMENT_IDS } },
   });
 
   console.log(

@@ -252,9 +252,11 @@ export class RolesService {
    * Atribuir cargo a um usuário
    * Apenas admin pode atribuir cargos
    */
-  async assignRoleToUser(userId: string, roleId: string) {
-    const user = await db.user.findUnique({
-      where: { id: userId },
+  async assignRoleToUser(userId: string, roleId: string, companyId: string) {
+    // Role é global por decisão (D-0B.5), mas o usuário alvo não pode ser de
+    // outra empresa: admin de A não altera cargo de usuário de B.
+    const user = await db.user.findFirst({
+      where: { id: userId, companyId },
     });
 
     if (!user) {

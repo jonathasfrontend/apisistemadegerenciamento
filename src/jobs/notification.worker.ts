@@ -41,12 +41,22 @@ export const notificationWorker = new Worker(
       const appointment = await prisma.appointment.findUnique({
         where: { id: data.appointmentId },
         select: {
+          companyId: true,
           status: true,
           startTime: true,
           client: { select: { name: true } },
           staff: { select: { userId: true } },
         },
       });
+
+      // companyId do payload é dica; o banco é a fonte da verdade. Divergência
+      // descarta o job — nunca notificar fora do tenant do agendamento.
+      if (appointment && data.companyId && data.companyId !== appointment.companyId) {
+        logger.info(
+          `Job ${job.id} descartado — companyId do payload diverge do agendamento`
+        );
+        return;
+      }
 
       // O job só vale se o agendamento continuar ativo E já tiver começado.
       if (
@@ -62,7 +72,7 @@ export const notificationWorker = new Worker(
 
       // Destinatários resolvidos AGORA, no banco: se o profissional foi
       // reatribuído, o novo recebe e o antigo não.
-      const userIds = await resolveAppointmentStartRecipients(appointment.staff.userId);
+      const userIds = await resolveAppointmentStartRecipients(appointment.staff.userId, appointment.companyId);
       if (userIds.length === 0) {
         logger.info(`Job ${job.id} descartado — sem destinatários ativos`);
         return;
@@ -74,7 +84,7 @@ export const notificationWorker = new Worker(
         appointmentId: data.appointmentId,
         link: `/appointments/${data.appointmentId}`,
         dedupeKey: appointmentStartDedupeKey(data.appointmentId, appointment.startTime),
-      });
+      }, appointment.companyId);
 
       logger.info(`Aviso de horário entregue: ${data.appointmentId}`);
     } catch (error: any) {
