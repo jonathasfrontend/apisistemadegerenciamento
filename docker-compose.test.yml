@@ -1,0 +1,14 @@
+services:
+  test-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: salao
+      POSTGRES_PASSWORD: salao_test
+      POSTGRES_DB: salao_test
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salao -d salao_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
