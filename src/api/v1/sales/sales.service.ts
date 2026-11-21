@@ -24,21 +24,17 @@ interface SaleFilters {
 }
 
 export class SalesService {
-  async create(data: CreateSaleDTO): Promise<Sale> {
+  async create(data: CreateSaleDTO, companyId: string): Promise<Sale> {
     const totalAmount = data.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
 
     const sale = await runSerializable(prisma, async (tx) => {
       // Vendas que cruzam o limite de reposição (aviso só depois do commit)
       const lowStockEvents: { product: LowStockProduct; eventId: string }[] = [];
 
-      // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
-      const company = await tx.company.findFirst({ where: { isActive: true }, select: { id: true } });
-      if (!company) throw new Error('No active company provisioned');
-
       // Criar venda
       const newSale = await tx.sale.create({
         data: {
-          companyId: company.id,
+          companyId,
           clientId: data.clientId,
           totalAmount,
           paymentMethod: data.paymentMethod,
@@ -108,9 +104,9 @@ export class SalesService {
     return sale.sale;
   }
 
-  async list(filters: SaleFilters = {}): Promise<Sale[]> {
-    const where: any = {};
-    
+  async list(filters: SaleFilters = {}, companyId: string): Promise<Sale[]> {
+    const where: any = { companyId };
+
     if (filters.clientId) {
       where.clientId = filters.clientId;
     }
@@ -147,9 +143,9 @@ export class SalesService {
     });
   }
 
-  async getById(id: string): Promise<Sale | null> {
-    return await prisma.sale.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Sale | null> {
+    return await prisma.sale.findFirst({
+      where: { id, companyId },
       include: {
         items: {
           include: {

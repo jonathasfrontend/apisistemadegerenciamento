@@ -15,7 +15,7 @@ export class UsersController {
    */
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const user = await this.usersService.create(req.body);
+      const user = await this.usersService.create(req.body, req.user!.companyId);
 
       logger.info(`User created: ${user.id} - ${user.email}`);
 

@@ -15,7 +15,7 @@ export class PaymentsController {
    */
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const payment = await this.paymentsService.create(req.body);
+      const payment = await this.paymentsService.create(req.body, req.user!.companyId);
       
       logger.info(`Payment created: ${payment.id}`);
       
@@ -51,7 +51,7 @@ export class PaymentsController {
         };
       }
 
-      const payments = await this.paymentsService.list(filters);
+      const payments = await this.paymentsService.list(filters, req.user!.companyId);
       
       res.json({
         status: 'success',
@@ -73,7 +73,7 @@ export class PaymentsController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const payment = await this.paymentsService.getById(id);
+      const payment = await this.paymentsService.getById(id, req.user!.companyId);
       
       if (!payment) {
         res.status(404).json({
@@ -103,7 +103,7 @@ export class PaymentsController {
   confirm = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const payment = await this.paymentsService.confirm(id);
+      const payment = await this.paymentsService.confirm(id, req.user!.companyId);
       
       logger.info(`Payment confirmed: ${id}`);
       
@@ -127,7 +127,7 @@ export class PaymentsController {
   refund = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const payment = await this.paymentsService.refund(id);
+      const payment = await this.paymentsService.refund(id, req.user!.companyId);
       
       logger.info(`Payment refunded: ${id}`);
       
@@ -162,7 +162,8 @@ export class PaymentsController {
 
       const report = await this.paymentsService.generateReport(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       
       res.json({

@@ -81,7 +81,7 @@ export const deleteClient = asyncHandler(
 
 export const getClientHistory = asyncHandler(
   async (req: Request, res: Response) => {
-    const history = await clientService.getHistory(req.params.id);
+    const history = await clientService.getHistory(req.params.id, req.user!.companyId);
 
     res.json({
       status: 'success',

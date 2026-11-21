@@ -11,7 +11,7 @@ export class ExpensesController {
 
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const expense = await this.expensesService.create(req.body);
+      const expense = await this.expensesService.create(req.body, req.user!.companyId);
       logger.info(`Expense created: ${expense.id}`);
       res.status(201).json({ status: 'success', data: { expense } });
     } catch (error: any) {
@@ -32,7 +32,7 @@ export class ExpensesController {
           end: endDate ? new Date(endDate as string) : undefined,
         };
       }
-      const expenses = await this.expensesService.list(filters);
+      const expenses = await this.expensesService.list(filters, req.user!.companyId);
       res.json({ status: 'success', data: expenses });
     } catch (error: any) {
       logger.error('Error listing expenses:', error);
@@ -43,7 +43,7 @@ export class ExpensesController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const expense = await this.expensesService.getById(id);
+      const expense = await this.expensesService.getById(id, req.user!.companyId);
       if (!expense) {
         res.status(404).json({ status: 'error', message: 'Expense not found' });
         return;
@@ -58,7 +58,7 @@ export class ExpensesController {
   update = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const expense = await this.expensesService.update(id, req.body);
+      const expense = await this.expensesService.update(id, req.body, req.user!.companyId);
       logger.info(`Expense updated: ${id}`);
       res.json({ status: 'success', data: { expense } });
     } catch (error: any) {
@@ -70,7 +70,7 @@ export class ExpensesController {
   markAsPaid = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const expense = await this.expensesService.markAsPaid(id);
+      const expense = await this.expensesService.markAsPaid(id, req.user!.companyId);
       logger.info(`Expense marked as paid: ${id}`);
       res.json({ status: 'success', data: { expense } });
     } catch (error: any) {
@@ -82,7 +82,7 @@ export class ExpensesController {
   delete = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.expensesService.delete(id);
+      await this.expensesService.delete(id, req.user!.companyId);
       logger.info(`Expense deleted: ${id}`);
       res.json({ status: 'success', message: 'Expense deleted successfully' });
     } catch (error: any) {

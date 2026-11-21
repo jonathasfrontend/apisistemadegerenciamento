@@ -6,7 +6,7 @@ export class ReportsService {
   // =============================================
   // DASHBOARD GERAL
   // =============================================
-  async getDashboard(startDate: Date, endDate: Date) {
+  async getDashboard(startDate: Date, endDate: Date, companyId: string) {
     const [appointments, payments, expenses, clients] = await Promise.all([
       prisma.appointment.count({
         where: {
@@ -15,6 +15,7 @@ export class ReportsService {
       }),
       prisma.payment.aggregate({
         where: {
+          companyId,
           status: 'PAID',
           createdAt: { gte: startDate, lte: endDate },
         },
@@ -23,6 +24,7 @@ export class ReportsService {
       }),
       prisma.expense.aggregate({
         where: {
+          companyId,
           isPaid: true,
           paidDate: { gte: startDate, lte: endDate },
         },
@@ -56,7 +58,7 @@ export class ReportsService {
   /**
    * Receita por Período com comparação
    */
-  async getRevenueByPeriod(startDate: Date, endDate: Date) {
+  async getRevenueByPeriod(startDate: Date, endDate: Date, companyId: string) {
     // Calcular período anterior para comparação
     const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
     const previousStart = new Date(startDate.getTime() - days * 24 * 60 * 60 * 1000);
@@ -66,6 +68,7 @@ export class ReportsService {
       // Receitas período atual
       prisma.payment.aggregate({
         where: {
+          companyId,
           status: 'PAID',
           paidAt: { gte: startDate, lte: endDate },
         },
@@ -75,6 +78,7 @@ export class ReportsService {
       // Receitas período anterior
       prisma.payment.aggregate({
         where: {
+          companyId,
           status: 'PAID',
           paidAt: { gte: previousStart, lte: previousEnd },
         },
@@ -84,6 +88,7 @@ export class ReportsService {
       // Despesas período atual
       prisma.expense.aggregate({
         where: {
+          companyId,
           isPaid: true,
           paidDate: { gte: startDate, lte: endDate },
         },
@@ -92,6 +97,7 @@ export class ReportsService {
       // Despesas detalhadas período atual
       prisma.expense.findMany({
         where: {
+          companyId,
           paidDate: { gte: startDate, lte: endDate },
         },
         select: {
@@ -105,6 +111,7 @@ export class ReportsService {
       // Despesas período anterior
       prisma.expense.aggregate({
         where: {
+          companyId,
           isPaid: true,
           paidDate: { gte: previousStart, lte: previousEnd },
         },
@@ -197,10 +204,11 @@ export class ReportsService {
   /**
    * Receita por Método de Pagamento
    */
-  async getRevenueByPaymentMethod(startDate: Date, endDate: Date) {
+  async getRevenueByPaymentMethod(startDate: Date, endDate: Date, companyId: string) {
     const paymentsByMethod = await prisma.payment.groupBy({
       by: ['method'],
       where: {
+        companyId,
         status: 'PAID',
         paidAt: { gte: startDate, lte: endDate },
       },
@@ -287,10 +295,10 @@ export class ReportsService {
   /**
    * Relatório Financeiro Completo
    */
-  async getFinancialComplete(startDate: Date, endDate: Date) {
+  async getFinancialComplete(startDate: Date, endDate: Date, companyId: string) {
     const [revenueByPeriod, revenueByMethod, profitableServices, commissions] = await Promise.all([
-      this.getRevenueByPeriod(startDate, endDate),
-      this.getRevenueByPaymentMethod(startDate, endDate),
+      this.getRevenueByPeriod(startDate, endDate, companyId),
+      this.getRevenueByPaymentMethod(startDate, endDate, companyId),
       this.getMostProfitableServices(startDate, endDate),
       prisma.commission.aggregate({
         where: {
@@ -646,7 +654,7 @@ export class ReportsService {
   /**
    * Análise de Clientes
    */
-  async getClientsAnalysis(startDate: Date, endDate: Date) {
+  async getClientsAnalysis(startDate: Date, endDate: Date, companyId: string) {
     const [newClients, totalClients, clientsWithAppointments, topClients] = await Promise.all([
       // Novos clientes no período
       prisma.client.count({
@@ -671,6 +679,7 @@ export class ReportsService {
       prisma.payment.groupBy({
         by: ['clientId'],
         where: {
+          companyId,
           status: 'PAID',
           paidAt: { gte: startDate, lte: endDate },
         },

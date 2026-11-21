@@ -34,7 +34,7 @@ export class UsersService {
   /**
    * Criar um novo usuário
    */
-  async create(data: CreateUserDTO): Promise<Omit<User, 'passwordHash'>> {
+  async create(data: CreateUserDTO, companyId: string): Promise<Omit<User, 'passwordHash'>> {
     // Verificar se o email já existe
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email.toLowerCase() },
@@ -47,10 +47,6 @@ export class UsersService {
     // Hash da senha
     const passwordHash = await bcrypt.hash(data.password, 10);
 
-    // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
-    const company = await prisma.company.findFirst({ where: { isActive: true }, select: { id: true } });
-    if (!company) throw new AppError('No active company provisioned', 500);
-
     // Criar usuário
     const user = await prisma.user.create({
       data: {
@@ -60,7 +56,7 @@ export class UsersService {
         phone: data.phone,
         avatar: data.avatar,
         roleId: data.roleId,
-        companyId: company.id,
+        companyId,
       },
       include: {
         role: {

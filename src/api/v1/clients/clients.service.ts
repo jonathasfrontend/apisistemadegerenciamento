@@ -256,7 +256,7 @@ export class ClientService {
     return { message: 'Client deleted successfully' };
   }
 
-  async getHistory(id: string) {
+  async getHistory(id: string, companyId: string) {
     const client = await prisma.client.findUnique({
       where: { id },
     });
@@ -278,12 +278,13 @@ export class ClientService {
         },
       }),
       prisma.payment.findMany({
-        where: { clientId: id },
+        where: { clientId: id, companyId },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.payment.aggregate({
         where: {
           clientId: id,
+          companyId,
           status: 'PAID',
         },
         _sum: {

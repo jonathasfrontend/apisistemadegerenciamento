@@ -1,5 +1,6 @@
 import { Expense } from '@prisma/client';
 import { createPrismaClient } from '../../../config/db';
+import { AppError } from '../../../middlewares/error.handler';
 
 const prisma = createPrismaClient();
 
@@ -31,13 +32,10 @@ interface ExpenseFilters {
 }
 
 export class ExpensesService {
-  async create(data: CreateExpenseDTO): Promise<Expense> {
-    // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
-    const company = await prisma.company.findFirst({ where: { isActive: true }, select: { id: true } });
-    if (!company) throw new Error('No active company provisioned');
+  async create(data: CreateExpenseDTO, companyId: string): Promise<Expense> {
     return await prisma.expense.create({
       data: {
-        companyId: company.id,
+        companyId,
         description: data.description,
         category: data.category,
         amount: data.amount,
@@ -48,9 +46,9 @@ export class ExpensesService {
     });
   }
 
-  async list(filters: ExpenseFilters = {}): Promise<Expense[]> {
-    const where: any = {};
-    
+  async list(filters: ExpenseFilters = {}, companyId: string): Promise<Expense[]> {
+    const where: any = { companyId };
+
     if (filters.category) {
       where.category = filters.category;
     }
@@ -77,20 +75,22 @@ export class ExpensesService {
     });
   }
 
-  async getById(id: string): Promise<Expense | null> {
-    return await prisma.expense.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Expense | null> {
+    return await prisma.expense.findFirst({
+      where: { id, companyId },
     });
   }
 
-  async update(id: string, data: UpdateExpenseDTO): Promise<Expense> {
+  async update(id: string, data: UpdateExpenseDTO, companyId: string): Promise<Expense> {
+    await this.assertScoped(id, companyId);
     return await prisma.expense.update({
       where: { id },
       data,
     });
   }
 
-  async markAsPaid(id: string): Promise<Expense> {
+  async markAsPaid(id: string, companyId: string): Promise<Expense> {
+    await this.assertScoped(id, companyId);
     return await prisma.expense.update({
       where: { id },
       data: {
@@ -100,9 +100,15 @@ export class ExpensesService {
     });
   }
 
-  async delete(id: string): Promise<Expense> {
+  async delete(id: string, companyId: string): Promise<Expense> {
+    await this.assertScoped(id, companyId);
     return await prisma.expense.delete({
       where: { id },
     });
+  }
+
+  private async assertScoped(id: string, companyId: string): Promise<void> {
+    const found = await prisma.expense.findFirst({ where: { id, companyId }, select: { id: true } });
+    if (!found) throw new AppError('Expense not found', 404);
   }
 }

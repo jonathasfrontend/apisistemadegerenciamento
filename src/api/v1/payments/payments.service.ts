@@ -1,5 +1,6 @@
 import { NotificationType, Payment, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { createPrismaClient } from '../../../config/db';
+import { AppError } from '../../../middlewares/error.handler';
 import { notifyResource } from '../notifications/notifications.service';
 import { paymentPaidMessage } from './payment-messages';
 
@@ -27,18 +28,12 @@ export class PaymentsService {
   /**
    * Criar um novo pagamento
    */
-  async create(data: CreatePaymentDTO): Promise<Payment> {
-    // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
-    const company = await prisma.company.findFirst({ where: { isActive: true }, select: { id: true } });
-    if (!company) throw new Error('No active company provisioned');
+  async create(data: CreatePaymentDTO, companyId: string): Promise<Payment> {
     const payment = await prisma.payment.create({
       data: {
-        companyId: company.id,
-        appointmentId: data.appointmentId,
-        clientId: data.clientId,
-        amount: data.amount,
-        method: data.method,
-        gatewayReference: data.gatewayReference,
+        // companyId depois do spread: valor do cliente nunca sobrescreve o contexto
+        ...data,
+        companyId,
         status: PaymentStatus.PENDING,
       },
       include: {
@@ -66,9 +61,9 @@ export class PaymentsService {
   /**
    * Listar pagamentos com filtros
    */
-  async list(filters: PaymentFilters = {}): Promise<Payment[]> {
-    const where: any = {};
-    
+  async list(filters: PaymentFilters = {}, companyId: string): Promise<Payment[]> {
+    const where: any = { companyId };
+
     if (filters.status) {
       where.status = filters.status as PaymentStatus;
     }
@@ -131,9 +126,9 @@ export class PaymentsService {
   /**
    * Buscar pagamento por ID
    */
-  async getById(id: string): Promise<Payment | null> {
-    return await prisma.payment.findUnique({
-      where: { id },
+  async getById(id: string, companyId: string): Promise<Payment | null> {
+    return await prisma.payment.findFirst({
+      where: { id, companyId },
       include: {
         client: true,
         appointment: true,
@@ -153,7 +148,11 @@ export class PaymentsService {
   /**
    * Confirmar pagamento
    */
-  async confirm(id: string): Promise<Payment> {
+  async confirm(id: string, companyId: string): Promise<Payment> {
+    // Leitura escopada antes de qualquer escrita — bloqueia cross-tenant
+    const scoped = await prisma.payment.findFirst({ where: { id, companyId }, select: { id: true } });
+    if (!scoped) throw new AppError('Payment not found', 404);
+
     const payment = await prisma.payment.update({
       where: { id },
       data: {
@@ -225,7 +224,11 @@ export class PaymentsService {
   /**
    * Reembolsar pagamento
    */
-  async refund(id: string): Promise<Payment> {
+  async refund(id: string, companyId: string): Promise<Payment> {
+    // Leitura escopada antes de qualquer escrita — bloqueia cross-tenant
+    const scoped = await prisma.payment.findFirst({ where: { id, companyId }, select: { id: true } });
+    if (!scoped) throw new AppError('Payment not found', 404);
+
     const payment = await prisma.payment.update({
       where: { id },
       data: {
@@ -253,9 +256,10 @@ export class PaymentsService {
   /**
    * Gerar relatório de pagamentos
    */
-  async generateReport(startDate: Date, endDate: Date) {
+  async generateReport(startDate: Date, endDate: Date, companyId: string) {
     const payments = await prisma.payment.findMany({
       where: {
+        companyId,
         createdAt: {
           gte: startDate,
           lte: endDate,
@@ -271,6 +275,7 @@ export class PaymentsService {
     const byMethod = await prisma.payment.groupBy({
       by: ['method'],
       where: {
+        companyId,
         createdAt: {
           gte: startDate,
           lte: endDate,

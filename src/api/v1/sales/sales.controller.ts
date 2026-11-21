@@ -11,7 +11,7 @@ export class SalesController {
 
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const sale = await this.salesService.create(req.body);
+      const sale = await this.salesService.create(req.body, req.user!.companyId);
       logger.info(`Sale created: ${sale.id}`);
       res.status(201).json({ status: 'success', data: { sale } });
     } catch (error: any) {
@@ -31,7 +31,7 @@ export class SalesController {
           end: endDate ? new Date(endDate as string) : undefined,
         };
       }
-      const sales = await this.salesService.list(filters);
+      const sales = await this.salesService.list(filters, req.user!.companyId);
       res.json({ status: 'success', data: sales });
     } catch (error: any) {
       logger.error('Error listing sales:', error);
@@ -42,7 +42,7 @@ export class SalesController {
   getById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const sale = await this.salesService.getById(id);
+      const sale = await this.salesService.getById(id, req.user!.companyId);
       if (!sale) {
         res.status(404).json({ status: 'error', message: 'Sale not found' });
         return;

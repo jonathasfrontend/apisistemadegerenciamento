@@ -66,6 +66,7 @@ export class AuthService {
       sub: user.id,
       role: user.role.name,
       permissions,
+      companyId: user.companyId,
     });
 
     const refreshToken = await this.generateRefreshToken(user.id);
@@ -139,6 +140,7 @@ export class AuthService {
       sub: storedToken.user.id,
       role: storedToken.user.role.name,
       permissions,
+      companyId: storedToken.user.companyId,
     });
 
     const newRefreshToken = await this.generateRefreshToken(storedToken.user.id);
@@ -194,14 +196,19 @@ export class AuthService {
     // Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
-    const company: any = await (prisma as any).company.findFirst({
+    // Registro é rota pública: vincular à única empresa ativa.
+    // Multiempresa em registro não existe — ver AUDIT §13 (adaptação F0.2).
+    const companies: any[] = await (prisma as any).company.findMany({
       where: { isActive: true },
       select: { id: true },
     });
-    if (!company) {
-      throw new AppError('No active company provisioned', 500);
+    if (companies.length === 0) {
+      throw new AppError('No company provisioned', 500);
     }
+    if (companies.length > 1) {
+      throw new AppError('Multiple companies provisioned; explicit registration flow required', 400);
+    }
+    const company = companies[0];
 
     // Create user
     const user: any = await prisma.user.create({
@@ -237,6 +244,7 @@ export class AuthService {
       sub: user.id,
       role: user.role.name,
       permissions,
+      companyId: user.companyId,
     });
 
     const refreshToken = await this.generateRefreshToken(user.id);
@@ -256,7 +264,7 @@ export class AuthService {
     };
   }
 
-  private generateAccessToken(payload: { sub: string; role: string; permissions: string[] }): string {
+  private generateAccessToken(payload: { sub: string; role: string; permissions: string[]; companyId: string }): string {
     return jwt.sign(payload, env.jwtSecret as string, {
       expiresIn: env.jwtAccessExpiration,
     } as jwt.SignOptions);

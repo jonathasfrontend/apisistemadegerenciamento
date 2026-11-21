@@ -21,7 +21,8 @@ export class ReportsController {
       const { startDate, endDate } = req.query;
       const report = await this.reportsService.getDashboard(
         startDate ? new Date(startDate as string) : new Date(new Date().setDate(1)),
-        endDate ? new Date(endDate as string) : new Date()
+        endDate ? new Date(endDate as string) : new Date(),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -50,7 +51,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getRevenueByPeriod(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -75,7 +77,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getRevenueByPaymentMethod(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -125,7 +128,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getFinancialComplete(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -276,7 +280,8 @@ export class ReportsController {
       }
       const report = await this.reportsService.getClientsAnalysis(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       res.json({ status: 'success', data: report });
     } catch (error: any) {
@@ -351,7 +356,8 @@ export class ReportsController {
       const { startDate, endDate } = req.query;
       const data = await this.reportsService.getDashboard(
         startDate ? new Date(startDate as string) : new Date(new Date().setDate(1)),
-        endDate ? new Date(endDate as string) : new Date()
+        endDate ? new Date(endDate as string) : new Date(),
+        req.user!.companyId
       );
       await this.exportService.exportDashboardToExcel(data, res);
     } catch (error: any) {
@@ -376,7 +382,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getFinancialComplete(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportFinancialCompleteToExcel(data, res);
     } catch (error: any) {
@@ -465,7 +472,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getClientsAnalysis(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportClientsReportToExcel(data, 'analysis', res);
     } catch (error: any) {
@@ -517,7 +525,8 @@ export class ReportsController {
       const { startDate, endDate } = req.query;
       const data = await this.reportsService.getDashboard(
         startDate ? new Date(startDate as string) : new Date(new Date().setDate(1)),
-        endDate ? new Date(endDate as string) : new Date()
+        endDate ? new Date(endDate as string) : new Date(),
+        req.user!.companyId
       );
       await this.exportService.exportDashboardToPDF(data, res);
     } catch (error: any) {
@@ -542,7 +551,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getFinancialComplete(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportFinancialCompleteToPDF(data, res);
     } catch (error: any) {
@@ -617,7 +627,8 @@ export class ReportsController {
       }
       const data = await this.reportsService.getClientsAnalysis(
         new Date(startDate as string),
-        new Date(endDate as string)
+        new Date(endDate as string),
+        req.user!.companyId
       );
       await this.exportService.exportGenericReportToPDF('📊 ANÁLISE DE CLIENTES', data, res);
     } catch (error: any) {

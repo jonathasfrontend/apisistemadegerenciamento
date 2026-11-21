@@ -8,6 +8,7 @@ interface JwtPayload {
   sub: string;
   role: string;
   permissions: string[];
+  companyId?: string; // claim informativa; autoridade é o valor recarregado do banco
   iat: number;
   exp: number;
 }
@@ -19,6 +20,7 @@ declare global {
         id: string;
         role: string;
         permissions: string[];
+        companyId: string;
       };
     }
   }
@@ -64,6 +66,11 @@ export const authenticate = async (
       throw new AppError('User has no role assigned', 401);
     }
 
+    // F0.2: empresa é contexto obrigatório; valor vem do banco, nunca do token/body
+    if (!user.companyId) {
+      throw new AppError('User has no company assigned', 401);
+    }
+
     // Extract permissions from role
     const permissions = user.role.rolePermissions.map(
       (rp: any) => rp.permission.name
@@ -73,6 +80,7 @@ export const authenticate = async (
       id: user.id,
       role: user.role.name,
       permissions,
+      companyId: user.companyId,
     };
 
     next();
