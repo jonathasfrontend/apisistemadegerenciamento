@@ -32,8 +32,12 @@ interface ExpenseFilters {
 
 export class ExpensesService {
   async create(data: CreateExpenseDTO): Promise<Expense> {
+    // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
+    const company = await prisma.company.findFirst({ where: { isActive: true }, select: { id: true } });
+    if (!company) throw new Error('No active company provisioned');
     return await prisma.expense.create({
       data: {
+        companyId: company.id,
         description: data.description,
         category: data.category,
         amount: data.amount,

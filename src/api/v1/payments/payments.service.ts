@@ -28,8 +28,12 @@ export class PaymentsService {
    * Criar um novo pagamento
    */
   async create(data: CreatePaymentDTO): Promise<Payment> {
+    // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
+    const company = await prisma.company.findFirst({ where: { isActive: true }, select: { id: true } });
+    if (!company) throw new Error('No active company provisioned');
     const payment = await prisma.payment.create({
       data: {
+        companyId: company.id,
         appointmentId: data.appointmentId,
         clientId: data.clientId,
         amount: data.amount,

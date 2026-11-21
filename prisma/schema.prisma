@@ -83,29 +83,51 @@ enum NotificationStatus {
 // AUTHENTICATION & USERS
 // =============================================
 
-model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  passwordHash  String    @map("password_hash")
-  name          String
-  roleId        String?   @map("role_id")
-  isActive      Boolean   @default(true) @map("is_active")
-  phone         String?
-  avatar        String?
-  lastLogin     DateTime? @map("last_login")
-  
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+// Fase 0 (F0.2): multiempresa mínimo — ver FINANCEIRO_IMPLEMENTACAO.md §5.2
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  document  String? // CNPJ
+  timezone  String   @default("America/Sao_Paulo")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  role          Role?     @relation(fields: [roleId], references: [id])
-  refreshTokens RefreshToken[]
-  staff         Staff?
-  auditLogs     AuditLog[]
-  createdAppointments Appointment[] @relation("CreatedBy")
-  notifications Notification[]
+  users    User[]
+  payments Payment[]
+  expenses Expense[]
+  sales    Sale[]
+
+  @@map("companies")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String
+  roleId       String?   @map("role_id")
+  companyId    String // F0.2: NOT NULL após backfill (etapa 2)
+  isActive     Boolean   @default(true) @map("is_active")
+  phone        String?
+  avatar       String?
+  lastLogin    DateTime? @map("last_login")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  company             Company        @relation(fields: [companyId], references: [id])
+  role                Role?          @relation(fields: [roleId], references: [id])
+  refreshTokens       RefreshToken[]
+  staff               Staff?
+  auditLogs           AuditLog[]
+  createdAppointments Appointment[]  @relation("CreatedBy")
+  notifications       Notification[]
 
   @@index([roleId])
+  @@index([companyId])
   @@map("users")
 }
 
@@ -114,14 +136,14 @@ model User {
 // =============================================
 
 model Role {
-  id          String   @id @default(uuid())
-  name        String   @unique // "Admin", "Recepção", "Cabeleireiro", etc.
-  description String?  @db.Text
-  isSystem    Boolean  @default(false) @map("is_system") // Roles de sistema não podem ser deletadas
-  isActive    Boolean  @default(true) @map("is_active")
-  
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id          String  @id @default(uuid())
+  name        String  @unique // "Admin", "Recepção", "Cabeleireiro", etc.
+  description String? @db.Text
+  isSystem    Boolean @default(false) @map("is_system") // Roles de sistema não podem ser deletadas
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
   users           User[]
@@ -131,12 +153,12 @@ model Role {
 }
 
 model Permission {
-  id          String   @id @default(uuid())
-  name        String   @unique // "clients.read", "clients.create", "appointments.create", etc.
-  description String?  @db.Text
-  module      String   // "clients", "appointments", "staff", "reports", etc.
-  
-  createdAt   DateTime @default(now()) @map("created_at")
+  id          String  @id @default(uuid())
+  name        String  @unique // "clients.read", "clients.create", "appointments.create", etc.
+  description String? @db.Text
+  module      String // "clients", "appointments", "staff", "reports", etc.
+
+  createdAt DateTime @default(now()) @map("created_at")
 
   // Relations
   rolePermissions RolePermission[]
@@ -163,12 +185,12 @@ model RolePermission {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  userId    String    @map("user_id")
-  tokenHash String    @map("token_hash") @unique
-  revoked   Boolean   @default(false)
-  expiresAt DateTime  @map("expires_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  revoked   Boolean  @default(false)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -184,13 +206,13 @@ model RefreshToken {
 model Staff {
   id              String         @id @default(uuid())
   userId          String         @unique @map("user_id")
-  specialties     String[]       // ["manicure", "cabelo", "maquiagem"]
+  specialties     String[] // ["manicure", "cabelo", "maquiagem"]
   commissionType  CommissionType @default(PERCENT) @map("commission_type")
   commissionValue Float          @default(0) @map("commission_value")
   workSchedule    Json?          @map("work_schedule") // { "monday": { "start": "09:00", "end": "18:00" }, ... }
   blockedDates    Json?          @map("blocked_dates") // [{ "start": "2024-12-25", "end": "2024-12-26", "reason": "férias" }]
   isAvailable     Boolean        @default(true) @map("is_available")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -215,13 +237,13 @@ model Client {
   birthdate     DateTime?
   cpf           String?   @unique
   notes         String?   @db.Text
-  preferences   Json?     // { "preferredStaff": "uuid", "allergies": ["látex"], "favoriteColor": "#FF0000" }
+  preferences   Json? // { "preferredStaff": "uuid", "allergies": ["látex"], "favoriteColor": "#FF0000" }
   loyaltyPoints Int       @default(0) @map("loyalty_points")
   noShowCount   Int       @default(0) @map("no_show_count")
   isBlocked     Boolean   @default(false) @map("is_blocked")
   consentLGPD   Boolean   @default(false) @map("consent_lgpd")
   consentDate   DateTime? @map("consent_date")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -246,10 +268,10 @@ model Service {
   description     String? @db.Text
   durationMinutes Int     @map("duration_minutes")
   price           Float
-  category        String  // "cabelo", "unha", "estética", "maquiagem"
+  category        String // "cabelo", "unha", "estética", "maquiagem"
   isActive        Boolean @default(true) @map("is_active")
   allowsCombo     Boolean @default(true) @map("allows_combo")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -268,20 +290,20 @@ model Appointment {
   startTime   DateTime          @map("start_time")
   endTime     DateTime          @map("end_time")
   status      AppointmentStatus @default(SCHEDULED)
-  services    Json              // [{ "id": "uuid", "name": "Corte", "price": 50, "duration": 30 }]
+  services    Json // [{ "id": "uuid", "name": "Corte", "price": 50, "duration": 30 }]
   totalAmount Float             @default(0) @map("total_amount")
   notes       String?           @db.Text
   isPaid      Boolean           @default(false) @map("is_paid")
-  
-  createdBy   String            @map("created_by")
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  client       Client        @relation(fields: [clientId], references: [id])
-  staff        Staff         @relation(fields: [staffId], references: [id])
-  creator      User          @relation("CreatedBy", fields: [createdBy], references: [id])
-  payments     Payment[]
+  client        Client         @relation(fields: [clientId], references: [id])
+  staff         Staff          @relation(fields: [staffId], references: [id])
+  creator       User           @relation("CreatedBy", fields: [createdBy], references: [id])
+  payments      Payment[]
   notifications Notification[]
 
   @@index([startTime])
@@ -296,24 +318,27 @@ model Appointment {
 // =============================================
 
 model Payment {
-  id                String        @id @default(uuid())
-  appointmentId     String?       @map("appointment_id")
-  clientId          String        @map("client_id")
-  amount            Float
-  method            PaymentMethod
-  status            PaymentStatus @default(PENDING)
-  gatewayReference  String?       @map("gateway_reference")
-  gatewayResponse   Json?         @map("gateway_response")
-  paidAt            DateTime?     @map("paid_at")
-  
+  id               String        @id @default(uuid())
+  companyId        String // F0.2: NOT NULL após backfill (etapa 2)
+  appointmentId    String?       @map("appointment_id")
+  clientId         String        @map("client_id")
+  amount           Float
+  method           PaymentMethod
+  status           PaymentStatus @default(PENDING)
+  gatewayReference String?       @map("gateway_reference")
+  gatewayResponse  Json?         @map("gateway_response")
+  paidAt           DateTime?     @map("paid_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
+  company     Company      @relation(fields: [companyId], references: [id])
   appointment Appointment? @relation(fields: [appointmentId], references: [id])
   client      Client       @relation(fields: [clientId], references: [id])
   commissions Commission[]
 
+  @@index([companyId, status])
   @@index([appointmentId])
   @@index([clientId])
   @@index([status])
@@ -321,13 +346,13 @@ model Payment {
 }
 
 model Commission {
-  id        String   @id @default(uuid())
-  paymentId String   @map("payment_id")
-  staffId   String   @map("staff_id")
+  id        String    @id @default(uuid())
+  paymentId String    @map("payment_id")
+  staffId   String    @map("staff_id")
   amount    Float
-  isPaid    Boolean  @default(false) @map("is_paid")
+  isPaid    Boolean   @default(false) @map("is_paid")
   paidAt    DateTime? @map("paid_at")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
 
   // Relations
@@ -340,18 +365,23 @@ model Commission {
 }
 
 model Expense {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
+  companyId   String // F0.2: NOT NULL após backfill (etapa 2)
   description String
-  category    String   // "aluguel", "produtos", "salários", "água", "luz"
+  category    String // "aluguel", "produtos", "salários", "água", "luz"
   amount      Float
-  dueDate     DateTime @map("due_date")
+  dueDate     DateTime  @map("due_date")
   paidDate    DateTime? @map("paid_date")
-  isPaid      Boolean  @default(false) @map("is_paid")
-  isRecurring Boolean  @default(false) @map("is_recurring")
-  notes       String?  @db.Text
-  
+  isPaid      Boolean   @default(false) @map("is_paid")
+  isRecurring Boolean   @default(false) @map("is_recurring")
+  notes       String?   @db.Text
+
   createdAt DateTime @default(now()) @map("created_at")
 
+  // Relations
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, isPaid, dueDate])
   @@index([dueDate])
   @@index([category])
   @@map("expenses")
@@ -373,7 +403,7 @@ model Product {
   reorderThreshold Int     @default(10) @map("reorder_threshold")
   supplier         String?
   isActive         Boolean @default(true) @map("is_active")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -387,13 +417,13 @@ model Product {
 }
 
 model StockMovement {
-  id        String   @id @default(uuid())
-  productId String   @map("product_id")
-  type      String   // "IN" | "OUT" | "ADJUSTMENT"
+  id        String  @id @default(uuid())
+  productId String  @map("product_id")
+  type      String // "IN" | "OUT" | "ADJUSTMENT"
   quantity  Int
   reason    String?
-  reference String?  // nota fiscal, venda ID, etc
-  
+  reference String? // nota fiscal, venda ID, etc
+
   createdAt DateTime @default(now()) @map("created_at")
 
   product Product @relation(fields: [productId], references: [id])
@@ -408,17 +438,20 @@ model StockMovement {
 
 model Sale {
   id            String        @id @default(uuid())
+  companyId     String // F0.2: NOT NULL após backfill (etapa 2)
   clientId      String?       @map("client_id")
   totalAmount   Float         @map("total_amount")
   paymentMethod PaymentMethod @map("payment_method")
   paymentStatus PaymentStatus @default(PAID) @map("payment_status")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
 
   // Relations
-  client Client?    @relation(fields: [clientId], references: [id])
-  items  SaleItem[]
+  company Company    @relation(fields: [companyId], references: [id])
+  client  Client?    @relation(fields: [clientId], references: [id])
+  items   SaleItem[]
 
+  @@index([companyId])
   @@index([clientId])
   @@map("sales")
 }
@@ -444,35 +477,35 @@ model SaleItem {
 // =============================================
 
 model Notification {
-  id            String             @id @default(uuid())
-  userId        String?            @map("user_id")
-  appointmentId String?            @map("appointment_id")
+  id            String              @id @default(uuid())
+  userId        String?             @map("user_id")
+  appointmentId String?             @map("appointment_id")
   // Rota interna para onde o clique na notificação leva (/appointments/{id}, ...)
-  link          String?            @map("link")
+  link          String?             @map("link")
   // Chave do evento (ex.: "LOW_STOCK:{produtoId}:{timestamp}") — garante 1
   // registro por usuário por evento, mesmo com corrida entre worker e reconciliador
-  dedupeKey     String?            @map("dedupe_key")
+  dedupeKey     String?             @map("dedupe_key")
   type          NotificationType
   channel       NotificationChannel
-  recipient     String             // phone or email
-  message       String             @db.Text
-  status        NotificationStatus @default(PENDING)
-  readAt        DateTime?          @map("read_at")
-  scheduledFor  DateTime?          @map("scheduled_for")
-  sentAt        DateTime?          @map("sent_at")
-  errorMessage  String?            @map("error_message") @db.Text
-  attempts      Int                @default(0)
-  
+  recipient     String // phone or email
+  message       String              @db.Text
+  status        NotificationStatus  @default(PENDING)
+  readAt        DateTime?           @map("read_at")
+  scheduledFor  DateTime?           @map("scheduled_for")
+  sentAt        DateTime?           @map("sent_at")
+  errorMessage  String?             @map("error_message") @db.Text
+  attempts      Int                 @default(0)
+
   createdAt DateTime @default(now()) @map("created_at")
 
-  user          User?        @relation(fields: [userId], references: [id])
+  user        User?        @relation(fields: [userId], references: [id])
   appointment Appointment? @relation(fields: [appointmentId], references: [id])
 
+  @@unique([userId, dedupeKey])
   @@index([userId])
   @@index([appointmentId])
   @@index([status])
   @@index([scheduledFor])
-  @@unique([userId, dedupeKey])
   @@map("notifications")
 }
 
@@ -481,14 +514,14 @@ model Notification {
 // =============================================
 
 model Review {
-  id            String   @id @default(uuid())
-  clientId      String   @map("client_id")
-  rating        Int      // 1-5
-  comment       String?  @db.Text
+  id             String  @id @default(uuid())
+  clientId       String  @map("client_id")
+  rating         Int // 1-5
+  comment        String? @db.Text
   serviceQuality Int?    @map("service_quality")
-  staffBehavior Int?     @map("staff_behavior")
-  cleanliness   Int?
-  
+  staffBehavior  Int?    @map("staff_behavior")
+  cleanliness    Int?
+
   createdAt DateTime @default(now()) @map("created_at")
 
   client Client @relation(fields: [clientId], references: [id])
@@ -502,14 +535,14 @@ model Review {
 // =============================================
 
 model AuditLog {
-  id       String   @id @default(uuid())
-  userId   String?  @map("user_id")
-  action   String   // "CREATE", "UPDATE", "DELETE", "LOGIN", "LOGOUT"
-  entity   String   // "appointment", "payment", "user"
-  entityId String?  @map("entity_id")
-  payload  Json?
+  id        String  @id @default(uuid())
+  userId    String? @map("user_id")
+  action    String // "CREATE", "UPDATE", "DELETE", "LOGIN", "LOGOUT"
+  entity    String // "appointment", "payment", "user"
+  entityId  String? @map("entity_id")
+  payload   Json?
   ipAddress String? @map("ip_address")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
 
   user User? @relation(fields: [userId], references: [id])
@@ -525,14 +558,14 @@ model AuditLog {
 // =============================================
 
 model Waitlist {
-  id          String   @id @default(uuid())
-  clientName  String   @map("client_name")
-  clientPhone String   @map("client_phone")
-  serviceId   String   @map("service_id")
+  id            String    @id @default(uuid())
+  clientName    String    @map("client_name")
+  clientPhone   String    @map("client_phone")
+  serviceId     String    @map("service_id")
   preferredDate DateTime? @map("preferred_date")
-  notes       String?  @db.Text
-  isContacted Boolean  @default(false) @map("is_contacted")
-  
+  notes         String?   @db.Text
+  isContacted   Boolean   @default(false) @map("is_contacted")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([isContacted])

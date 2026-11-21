@@ -4,6 +4,19 @@ import bcrypt from 'bcrypt';
 // @ts-ignore - Prisma types may not be recognized by TypeScript server
 const prisma = new PrismaClient() as any;
 
+const COMPANY_NAME = process.env.FINANCE_COMPANY_NAME || 'Empresa padrão';
+
+async function ensureCompany() {
+  const existing = await prisma.company.findFirst({ where: { name: COMPANY_NAME } });
+  if (existing) {
+    console.log(`🏢 Empresa existente reutilizada: ${existing.name} (${existing.id})`);
+    return existing;
+  }
+  const created = await prisma.company.create({ data: { name: COMPANY_NAME } });
+  console.log(`🏢 Empresa criada: ${created.name} (${created.id})`);
+  return created;
+}
+
 async function main() {
   console.log('🌱 Seeding database...');
 
@@ -21,6 +34,8 @@ async function main() {
   await prisma.rolePermission.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.role.deleteMany();
+
+  const company = await ensureCompany();
 
   console.log('📋 Creating permissions...');
   
@@ -189,6 +204,7 @@ async function main() {
       passwordHash: adminPassword,
       name: 'Administrador',
       roleId: adminRole.id,
+      companyId: company.id,
       phone: '11999999999',
     },
   });
@@ -201,6 +217,7 @@ async function main() {
       passwordHash: receptionPassword,
       name: 'Recepcionista',
       roleId: receptionRole.id,
+      companyId: company.id,
       phone: '11988888888',
     },
   });
@@ -213,6 +230,7 @@ async function main() {
       passwordHash: staff1Password,
       name: 'Maria Silva',
       roleId: staffRole.id,
+      companyId: company.id,
       phone: '11977777777',
     },
   });
@@ -241,6 +259,7 @@ async function main() {
       passwordHash: staff2Password,
       name: 'Ana Costa',
       roleId: staffRole.id,
+      companyId: company.id,
       phone: '11966666666',
     },
   });

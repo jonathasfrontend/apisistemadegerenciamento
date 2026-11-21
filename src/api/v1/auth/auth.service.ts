@@ -194,6 +194,15 @@ export class AuthService {
     // Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
+    // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
+    const company: any = await (prisma as any).company.findFirst({
+      where: { isActive: true },
+      select: { id: true },
+    });
+    if (!company) {
+      throw new AppError('No active company provisioned', 500);
+    }
+
     // Create user
     const user: any = await prisma.user.create({
       data: {
@@ -201,6 +210,7 @@ export class AuthService {
         passwordHash,
         name,
         roleId: finalRoleId,
+        companyId: company.id,
       } as any,
       include: {
         role: {

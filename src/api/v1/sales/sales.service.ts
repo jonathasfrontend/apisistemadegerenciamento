@@ -31,9 +31,14 @@ export class SalesService {
       // Vendas que cruzam o limite de reposição (aviso só depois do commit)
       const lowStockEvents: { product: LowStockProduct; eventId: string }[] = [];
 
+      // F0.2: vinculo obrigatorio ate o threading de req.user.companyId (Task 5)
+      const company = await tx.company.findFirst({ where: { isActive: true }, select: { id: true } });
+      if (!company) throw new Error('No active company provisioned');
+
       // Criar venda
       const newSale = await tx.sale.create({
         data: {
+          companyId: company.id,
           clientId: data.clientId,
           totalAmount,
           paymentMethod: data.paymentMethod,
