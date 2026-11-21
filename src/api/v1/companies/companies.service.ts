@@ -88,8 +88,9 @@ export class CompaniesService {
 
   /**
    * Company.name não tem UNIQUE no banco (D-0B.6: sem migration nova).
-   * Unicidade é validada em minúsculas/insensível a acento de caso antes da
-   * escrita. Risco residual: corrida entre duas requisições concorrentes —
+   * Unicidade validada com mode: 'insensitive' do Prisma (case-insensitive;
+   * NÃO accent-insensitive — "Empresa" e "Empréza" passam) antes da escrita.
+   * Risco residual: corrida entre duas requisições concorrentes —
    * aceitável enquanto a criação for operação restrita ao Admin.
    */
   private async assertNameAvailable(name: string, exceptId?: string): Promise<void> {

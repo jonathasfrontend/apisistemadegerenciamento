@@ -6,20 +6,39 @@ import { z } from 'zod';
 
 const router = Router();
 
+// Valida aliases IANA válidos (UTC, GMT, Etc/UTC) que a lista canônica da ICU
+// não inclui. Intl.DateTimeFormat lança RangeError para zonas inexistentes.
+const timezoneSchema = z
+  .string()
+  .trim()
+  .min(1, 'Fuso horário é obrigatório')
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }, { message: 'Fuso horário inválido' });
+
 const createCompanySchema = z.object({
   body: z.object({
-    name: z.string().trim().min(2, 'Nome deve ter ao menos 2 caracteres'),
+    name: z
+      .string()
+      .trim()
+      .min(2, 'Nome deve ter ao menos 2 caracteres')
+      .max(100, 'Nome deve ter no máximo 100 caracteres'),
     document: z.string().trim().max(20).optional(),
-    timezone: z.string().trim().min(1).optional(),
+    timezone: timezoneSchema.optional(),
     isActive: z.boolean().optional(),
   }),
 });
 
 const updateCompanySchema = z.object({
   body: z.object({
-    name: z.string().trim().min(2).optional(),
+    name: z.string().trim().min(2).max(100).optional(),
     document: z.string().trim().max(20).nullable().optional(),
-    timezone: z.string().trim().min(1).optional(),
+    timezone: timezoneSchema.optional(),
     isActive: z.boolean().optional(),
   }),
 });

@@ -172,4 +172,52 @@ describe('companies management and public registration off (finance F0B.4)', () 
     expect(persisted!.companyId).toBe(fixture.companyAId);
     expect(persisted!.companyId).not.toBe(fixture.companyBId);
   });
+
+  // Review 0B.2 — casos adicionados com TDD (RED antes do fix).
+  it('10. register com body malformado ainda responde 403 (antes da validação Zod)', async () => {
+    const before = await prisma.user.count();
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({});
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe('Cadastro desativado. Solicite ao administrador.');
+    expect(await prisma.user.count()).toBe(before);
+  });
+
+  it('11. GET /companies/:id sem companies.* responde 403', async () => {
+    const res = await request(app)
+      .get(`/api/v1/companies/${createdCompanyId}`)
+      .set('Authorization', `Bearer ${tokenNoPermission}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('12. name acima de 100 caracteres é rejeitado com 400', async () => {
+    const res = await request(app)
+      .post('/api/v1/companies')
+      .set('Authorization', `Bearer ${fixture.tokenA}`)
+      .send({ name: 'E'.repeat(101) });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('13. timezone fora da lista do Intl é rejeitado com 400', async () => {
+    const res = await request(app)
+      .post('/api/v1/companies')
+      .set('Authorization', `Bearer ${fixture.tokenA}`)
+      .send({ name: `Empresa TZ Inválido ${fixture.suffix}`, timezone: 'Marte/Base' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('14. aliases IANA válidos (UTC) são aceitos', async () => {
+    const res = await request(app)
+      .post('/api/v1/companies')
+      .set('Authorization', `Bearer ${fixture.tokenA}`)
+      .send({ name: `Empresa TZ UTC ${fixture.suffix}`, timezone: 'UTC' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.timezone).toBe('UTC');
+  });
 });
