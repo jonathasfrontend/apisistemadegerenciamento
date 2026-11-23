@@ -162,6 +162,15 @@ describe('finance seed and legacy category migration (finance F1.1b)', () => {
         dueDate: new Date('2026-11-01T00:00:00.000Z'),
       },
     });
+    const outsideScope = await prisma.expense.create({
+      data: {
+        companyId: fixture.companyBId,
+        description: `Fora escopo ${suffix}`,
+        category: 'Marketing',
+        amount: 7,
+        dueDate: new Date('2026-11-01T00:00:00.000Z'),
+      },
+    });
 
     const result = await migrateExpenseCategories(prisma, {
       companyIds: [fixture.companyAId],
@@ -183,15 +192,19 @@ describe('finance seed and legacy category migration (finance F1.1b)', () => {
     expect(byId.get(byCode.id)!.categoryId).not.toBeNull();
     expect(byId.get(noMatch.id)!.category).toBe(`INEXISTENTE-${suffix}`);
     expect(byId.get(noMatch.id)!.categoryId).toBeNull();
+
+    const untouched = await prisma.expense.findUnique({ where: { id: outsideScope.id } });
+    expect(untouched!.categoryId).toBeNull();
   }, 60_000);
 
   it('keeps /reports/dashboard deep-equal before and after the legacy migration', async () => {
     const suffix = fixture.suffix;
-    await prisma.expense.create({
+    // 'Aluguel' está desativado desde o teste de idempotência; usar ativa.
+    const dashboardExpense = await prisma.expense.create({
       data: {
         companyId: fixture.companyAId,
         description: `Dashboard ${suffix}`,
-        category: 'Aluguel',
+        category: 'Marketing',
         amount: 42,
         dueDate: new Date('2026-11-01T00:00:00.000Z'),
         paidDate: new Date('2026-11-05T00:00:00.000Z'),
@@ -206,9 +219,47 @@ describe('finance seed and legacy category migration (finance F1.1b)', () => {
 
     await migrateExpenseCategories(prisma, { companyIds: [fixture.companyAId] });
 
+    const linked = await prisma.expense.findUnique({ where: { id: dashboardExpense.id } });
+    expect(linked!.categoryId).not.toBeNull();
+
     const after = await request(app).get(query).set('Authorization', `Bearer ${fixture.tokenA}`);
     expect(after.status).toBe(200);
     expect(after.body).toEqual(before.body);
     expect(after.body.data.expenses.total).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('reports a colliding user category and still links CARD_FEES by its default name', async () => {
+    const suffix = fixture.suffix;
+    const company = await prisma.company.create({
+      data: { name: `Colisão ${suffix}` },
+    });
+    await prisma.financialCategory.create({
+      data: {
+        companyId: company.id,
+        kind: 'EXPENSE',
+        name: 'Taxas de maquininha',
+        isSystem: false,
+        isActive: true,
+      },
+    });
+
+    const seed = await seedCompanyFinance(prisma, company.id);
+    expect(seed.collisions).toContain('Taxas de maquininha');
+
+    const expense = await prisma.expense.create({
+      data: {
+        companyId: company.id,
+        description: `Colisão ${suffix}`,
+        category: 'CARD_FEES',
+        amount: 1,
+        dueDate: new Date('2026-11-01T00:00:00.000Z'),
+      },
+    });
+    const result = await migrateExpenseCategories(prisma, { companyIds: [company.id] });
+    expect(result.linked).toBe(1);
+
+    const linked = await prisma.expense.findUnique({ where: { id: expense.id } });
+    expect(linked!.categoryId).not.toBeNull();
+    expect(linked!.category).toBe('CARD_FEES');
   }, 60_000);
 });
