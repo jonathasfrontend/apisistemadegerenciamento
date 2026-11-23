@@ -48,7 +48,9 @@ describe('cash sessions and movements (finance F1.2 / C1-C9)', () => {
     });
     const user = await prisma.user.create({
       data: {
-        email: `${label}-${fixture.suffix}@test.local`,
+        // login() normaliza para minúsculas; o email precisa ser criado já
+        // minúsculo (Postgres compara email com case-sensitive).
+        email: `${label.toLowerCase()}-${fixture.suffix}@test.local`,
         passwordHash: await bcrypt.hash('teste123', 4),
         name: label,
         roleId: role.id,
@@ -282,6 +284,14 @@ describe('cash sessions and movements (finance F1.2 / C1-C9)', () => {
       .set('Authorization', `Bearer ${tokenReopen}`)
       .send({ countedCash: 75 });
     expect(res.status).toBe(403);
+
+    // O teste anterior já reabriu a sessão; fechar de novo para que este
+    // reopen exercise a transição CLOSED → OPEN (máquina de estados C8).
+    const reclose = await request(app)
+      .post(`${BASE}/${sessionId}/close`)
+      .set('Authorization', auth())
+      .send({ countedCash: 75, closingNotes: 'Revisão final' });
+    expect(reclose.status).toBe(200);
 
     const reopen = await request(app)
       .post(`${BASE}/${sessionId}/reopen`)

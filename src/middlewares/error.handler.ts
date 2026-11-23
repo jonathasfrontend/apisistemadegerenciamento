@@ -4,11 +4,15 @@ import { logger } from '../utils/logger';
 export class AppError extends Error {
   statusCode: number;
   isOperational: boolean;
+  /** [F1.2] Código estável para o cliente (ex.: CASH_SESSION_ALREADY_OPEN). */
+  code?: string;
 
-  constructor(message: string, statusCode: number = 500) {
+  // Terceiro argumento opcional: todos os chamadores existentes seguem válidos.
+  constructor(message: string, statusCode: number = 500, code?: string) {
     super(message);
     this.statusCode = statusCode;
     this.isOperational = true;
+    if (code) this.code = code;
 
     Error.captureStackTrace(this, this.constructor);
   }
@@ -30,6 +34,7 @@ export const errorHandler = (
     return res.status(err.statusCode).json({
       status: 'error',
       message: err.message,
+      ...(err.code ? { code: err.code } : {}),
     });
   }
 
