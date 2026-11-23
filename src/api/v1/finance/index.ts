@@ -1,8 +1,21 @@
 import { Router } from 'express';
 
-// Módulos F1+: cada subpasta nasce com .routes/.controller/.service/.schemas
-// na fase que a implementa. Registrar o mount `/api/v1/finance` em app.ts
-// somente quando o primeiro módulo tiver rotas reais (F1).
+import settingsRoutes from './settings/settings.routes';
+import categoriesRoutes from './categories/categories.routes';
+import suppliersRoutes from './suppliers/suppliers.routes';
+import bankAccountsRoutes from './bank-accounts/bank-accounts.routes';
+import acquirersRoutes from './acquirers/acquirers.routes';
+import cashRoutes from './cash/cash.routes';
+
+// F1.1c: cadastros e caixas registradas. Módulos F2/F3 entram aqui quando
+// implementados; cada subpasta mantém .routes/.controller/.service/.schemas.
 const router = Router();
+
+router.use('/settings', settingsRoutes);
+router.use('/categories', categoriesRoutes);
+router.use('/suppliers', suppliersRoutes);
+router.use('/bank-accounts', bankAccountsRoutes);
+router.use('/acquirers', acquirersRoutes);
+router.use('/cash', cashRoutes);
 
 export default router;

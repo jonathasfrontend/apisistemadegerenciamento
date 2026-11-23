@@ -25,6 +25,7 @@ import webhooksRoutes from './api/v1/webhooks/webhooks.routes';
 import reviewsRoutes from './api/v1/reviews/reviews.routes';
 import waitlistRoutes from './api/v1/waitlist/waitlist.routes';
 import notificationsRoutes from './api/v1/notifications/notifications.routes';
+import financeRoutes from './api/v1/finance';
 
 const app: Application = express();
 
@@ -88,6 +89,7 @@ app.use('/api/v1/webhooks', webhooksRoutes);
 app.use('/api/v1/reviews', reviewsRoutes);
 app.use('/api/v1/waitlist', waitlistRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
+app.use('/api/v1/finance', financeRoutes);
 
 // Ignorar favicon requests
 app.get('/favicon.ico', (_req: Request, res: Response) => {
