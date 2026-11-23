@@ -3,6 +3,9 @@ import { createPrismaClient } from '../../../config/db';
 import { AppError } from '../../../middlewares/error.handler';
 import { notifyResource } from '../notifications/notifications.service';
 import { paymentPaidMessage } from './payment-messages';
+import { financeHooks } from '../finance/hooks/finance-hooks.service';
+import { financeEvents } from '../../../events/finance.events';
+import { runSerializable } from '../../../utils/transaction';
 
 const prisma = createPrismaClient();
 
@@ -11,6 +14,7 @@ interface CreatePaymentDTO {
   clientId: string;
   amount: number;
   method: PaymentMethod;
+  acquirerId?: string;
   gatewayReference?: string;
 }
 
@@ -43,6 +47,16 @@ export class PaymentsService {
         select: { id: true },
       });
       if (!appointment) throw new AppError('Appointment not found', 404);
+    }
+
+    // [F1.3] acquirerId do body é fronteira de tenant: referência alheia
+    // linkaria o pagamento à maquininha de outra empresa.
+    if (data.acquirerId) {
+      const acquirer = await prisma.acquirer.findFirst({
+        where: { id: data.acquirerId, companyId },
+        select: { id: true },
+      });
+      if (!acquirer) throw new AppError('Acquirer not found', 404);
     }
 
     const payment = await prisma.payment.create({
@@ -162,113 +176,144 @@ export class PaymentsService {
   }
 
   /**
-   * Confirmar pagamento
+   * Confirmar pagamento — hooks financeiros na MESMA transação; notificação
+   * best-effort fora dela. `userId` é opcional só para chamadores legados:
+   * o controller sempre passa `req.user!.id` recarregado do banco (F0.2).
    */
-  async confirm(id: string, companyId: string): Promise<Payment> {
-    // Leitura escopada antes de qualquer escrita — bloqueia cross-tenant
-    const scoped = await prisma.payment.findFirst({ where: { id, companyId }, select: { id: true } });
-    if (!scoped) throw new AppError('Payment not found', 404);
+  async confirm(id: string, companyId: string, userId?: string): Promise<Payment> {
+    const result = await runSerializable(prisma, async (tx) => {
+      const scoped = await tx.payment.findFirst({
+        where: { id, companyId },
+        include: { appointment: { include: { client: true } } },
+      });
+      if (!scoped) throw new AppError('Payment not found', 404);
 
-    const payment = await prisma.payment.update({
-      where: { id },
-      data: {
-        status: PaymentStatus.PAID,
-        paidAt: new Date(),
-      },
-      include: {
-        appointment: {
-          include: {
-            client: true,
-          },
-        },
-      },
+      // Idempotência: confirmar de novo não duplica movimento, comissão ou recebível.
+      if (scoped.status === PaymentStatus.PAID) {
+        return { payment: scoped, notification: null, event: null };
+      }
+
+      // Estado terminal: reativar um estorno sem movimento compensatório
+      // desbalancearia o caixa (o SALE original já ocupa paymentId no unique).
+      if (scoped.status === PaymentStatus.REFUNDED) {
+        throw new AppError(
+          'Não é possível confirmar um pagamento estornado',
+          409,
+          'PAYMENT_REFUNDED'
+        );
+      }
+
+      const payment = await tx.payment.update({
+        where: { id },
+        data: { status: PaymentStatus.PAID, paidAt: new Date() },
+        include: { appointment: { include: { client: true } } },
+      });
+
+      // F1.3 — tudo dentro da transação: movimento de caixa, recebíveis, vínculos.
+      const event = await financeHooks.onPaymentConfirmed(tx, payment, companyId, userId);
+
+      if (payment.appointmentId) {
+        await tx.appointment.update({
+          where: { id: payment.appointmentId },
+          data: { isPaid: true },
+        });
+
+        const appointment = await tx.appointment.findUnique({
+          where: { id: payment.appointmentId },
+          include: { staff: true },
+        });
+        const commission = appointment
+          ? await tx.commission.findFirst({ where: { paymentId: payment.id }, select: { id: true } })
+          : null;
+
+        if (appointment && !commission) {
+          await tx.commission.create({
+            data: {
+              companyId,
+              paymentId: payment.id,
+              staffId: appointment.staffId,
+              amount: this.calculateCommission(
+                payment.amount,
+                appointment.staff.commissionType,
+                appointment.staff.commissionValue
+              ),
+            },
+          });
+        }
+      }
+
+      // Devolver o estado atualizado pelos hooks (cashSessionId, feeAmount, …).
+      const fresh = await tx.payment.findUniqueOrThrow({
+        where: { id },
+        include: { appointment: { include: { client: true } } },
+      });
+
+      const notification =
+        payment.appointmentId && payment.appointment
+          ? {
+              type: NotificationType.PAYMENT_PAID,
+              message: paymentPaidMessage(
+                payment.appointment.client.name,
+                payment.appointment.startTime
+              ),
+              appointmentId: payment.appointmentId,
+              link: `/appointments/${payment.appointmentId}`,
+              dedupeKey: `PAYMENT_PAID:${payment.appointmentId}`,
+            }
+          : null;
+
+      return { payment: fresh, notification, event };
     });
 
-    // Atualizar agendamento como pago
-    if (payment.appointmentId) {
-      await prisma.appointment.update({
-        where: { id: payment.appointmentId },
-        data: { isPaid: true },
-      });
-
-      // Criar comissões para o profissional
-      const appointment = await prisma.appointment.findUnique({
-        where: { id: payment.appointmentId },
-        include: {
-          staff: true,
-        },
-      });
-
-      if (appointment) {
-        const commissionAmount = this.calculateCommission(
-          payment.amount,
-          appointment.staff.commissionType,
-          appointment.staff.commissionValue
-        );
-
-        await prisma.commission.create({
-          data: {
-            companyId,
-            paymentId: payment.id,
-            staffId: appointment.staffId,
-            amount: commissionAmount,
-          },
-        });
-      }
+    // Fora da transação — notificação e evento são best-effort e não participam
+    // do commit. Um P2034 com retry não publica evento de tentativa abortada.
+    if (result.event) {
+      financeEvents.emit('payment.confirmed', result.event);
+    }
+    if (result.notification) {
+      await notifyResource(result.notification, { roleNames: ['Admin', 'Recepção'] }, companyId);
     }
 
-    // Avisar Admin + Recepção que o pagamento foi confirmado (best-effort).
-    // Pagamento sem agendamento não gera aviso — não há recurso para linkar.
-    if (payment.appointmentId && payment.appointment) {
-      await notifyResource(
-        {
-          type: NotificationType.PAYMENT_PAID,
-          message: paymentPaidMessage(
-            payment.appointment.client.name,
-            payment.appointment.startTime
-          ),
-          appointmentId: payment.appointmentId,
-          link: `/appointments/${payment.appointmentId}`,
-          dedupeKey: `PAYMENT_PAID:${payment.appointmentId}`,
-        },
-        { roleNames: ['Admin', 'Recepção'] },
-        companyId
-      );
-    }
-
-    return payment;
+    return result.payment;
   }
 
-  /**
-   * Reembolsar pagamento
-   */
-  async refund(id: string, companyId: string): Promise<Payment> {
-    // Leitura escopada antes de qualquer escrita — bloqueia cross-tenant
-    const scoped = await prisma.payment.findFirst({ where: { id, companyId }, select: { id: true } });
-    if (!scoped) throw new AppError('Payment not found', 404);
+  /** Reembolsar pagamento — hook dentro da transação (spec:1056). */
+  async refund(id: string, companyId: string, userId?: string): Promise<Payment> {
+    const result = await runSerializable(prisma, async (tx) => {
+      const scoped = await tx.payment.findFirst({ where: { id, companyId } });
+      if (!scoped) throw new AppError('Payment not found', 404);
+      if (scoped.status === PaymentStatus.REFUNDED) return { payment: scoped, event: null };
 
-    const payment = await prisma.payment.update({
-      where: { id },
-      data: {
-        status: PaymentStatus.REFUNDED,
-      },
-    });
+      const payment = await tx.payment.update({
+        where: { id },
+        data: { status: PaymentStatus.REFUNDED },
+      });
 
-    // Atualizar agendamento
-    if (payment.appointmentId) {
-      await prisma.appointment.update({
-        where: { id: payment.appointmentId },
+      const event = await financeHooks.onPaymentRefunded(tx, payment, companyId, userId);
+
+      if (payment.appointmentId) {
+        await tx.appointment.update({
+          where: { id: payment.appointmentId },
+          data: { isPaid: false },
+        });
+      }
+
+      await tx.commission.updateMany({
+        where: { paymentId: id, companyId },
         data: { isPaid: false },
       });
-    }
 
-    // Marcar comissões como não pagas
-    await prisma.commission.updateMany({
-      where: { paymentId: id, companyId },
-      data: { isPaid: false },
+      // O hook zerou feeAmount/netAmount: reler para a resposta não devolver
+      // valores obsoletos do Payment lido antes dele.
+      const fresh = await tx.payment.findUniqueOrThrow({ where: { id } });
+      return { payment: fresh, event };
     });
 
-    return payment;
+    if (result.event) {
+      financeEvents.emit('payment.refunded', result.event);
+    }
+
+    return result.payment;
   }
 
   /**

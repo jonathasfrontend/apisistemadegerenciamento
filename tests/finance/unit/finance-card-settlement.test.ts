@@ -88,7 +88,9 @@ describe('buildCardReceivables (F1.3)', () => {
       { method: 'CREDIT', amountCents: 30000, installments: 3, confirmedOn: CONFIRMED },
       { ...ACQUIRER, installmentRates: { '3': 5 } }
     );
-    expect(rows[0].feeCents).toBe(1500);
+    // 5% de 300,00 = 15,00 de taxa total → 5,00 por parcela (resto na 1ª).
+    expect(rows[0].feeCents).toBe(500);
+    expect(rows.reduce((sum, r) => sum + r.feeCents, 0)).toBe(1500);
   });
 
   it('crédito à vista usa creditRate', () => {

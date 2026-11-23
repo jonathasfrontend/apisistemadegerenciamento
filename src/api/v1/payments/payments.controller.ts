@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PaymentsService } from './payments.service';
 import { logger } from '../../../utils/logger';
+import { AppError } from '../../../middlewares/error.handler';
 
 export class PaymentsController {
   private paymentsService: PaymentsService;
@@ -25,9 +26,11 @@ export class PaymentsController {
       });
     } catch (error: any) {
       logger.error('Error creating payment:', error);
-      res.status(400).json({
+      const status = error instanceof AppError ? error.statusCode : 400;
+      res.status(status).json({
         status: 'error',
         message: error.message || 'Failed to create payment',
+        ...(error instanceof AppError && error.code ? { code: error.code } : {}),
       });
     }
   };
@@ -103,19 +106,21 @@ export class PaymentsController {
   confirm = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const payment = await this.paymentsService.confirm(id, req.user!.companyId);
-      
+      const payment = await this.paymentsService.confirm(id, req.user!.companyId, req.user!.id);
+
       logger.info(`Payment confirmed: ${id}`);
-      
+
       res.json({
         status: 'success',
         data: { payment },
       });
     } catch (error: any) {
       logger.error('Error confirming payment:', error);
-      res.status(400).json({
+      const status = error instanceof AppError ? error.statusCode : 400;
+      res.status(status).json({
         status: 'error',
         message: error.message || 'Failed to confirm payment',
+        ...(error instanceof AppError && error.code ? { code: error.code } : {}),
       });
     }
   };
@@ -127,19 +132,21 @@ export class PaymentsController {
   refund = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const payment = await this.paymentsService.refund(id, req.user!.companyId);
-      
+      const payment = await this.paymentsService.refund(id, req.user!.companyId, req.user!.id);
+
       logger.info(`Payment refunded: ${id}`);
-      
+
       res.json({
         status: 'success',
         data: { payment },
       });
     } catch (error: any) {
       logger.error('Error refunding payment:', error);
-      res.status(400).json({
+      const status = error instanceof AppError ? error.statusCode : 400;
+      res.status(status).json({
         status: 'error',
         message: error.message || 'Failed to refund payment',
+        ...(error instanceof AppError && error.code ? { code: error.code } : {}),
       });
     }
   };

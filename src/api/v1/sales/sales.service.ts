@@ -14,6 +14,7 @@ interface CreateSaleDTO {
     unitPrice: number;
   }>;
   paymentMethod: PaymentMethod;
+  acquirerId?: string;
 }
 
 interface SaleFilters {
@@ -39,6 +40,15 @@ export class SalesService {
           select: { id: true },
         });
         if (!client) throw new AppError('Client not found', 404);
+      }
+
+      // [F1.3] maquininha do PDV também é fronteira de tenant.
+      if (data.acquirerId) {
+        const acquirer = await tx.acquirer.findFirst({
+          where: { id: data.acquirerId, companyId },
+          select: { id: true },
+        });
+        if (!acquirer) throw new AppError('Acquirer not found', 404);
       }
 
       // Criar venda
@@ -103,6 +113,25 @@ export class SalesService {
         if (crossedLowStock(product.quantity, updatedProduct.quantity, updatedProduct.reorderThreshold)) {
           lowStockEvents.push({ product: updatedProduct, eventId: movement.id });
         }
+      }
+
+      // F1.3 (decisão 4A): o Payment nasce na MESMA transação da venda,
+      // com saleId e companyId do contexto — nunca do body. Status PENDING:
+      // a confirmação (hooks de caixa/cartão) acontece em /payments/:id/confirm.
+      // Payment exige clientId (schema). Venda sem cliente não gera Payment:
+      // o PDV pode seguir sem vínculo nesse caso, sem FK inválida.
+      if (data.clientId) {
+        await tx.payment.create({
+          data: {
+            companyId,
+            saleId: newSale.id,
+            clientId: data.clientId,
+            amount: totalAmount,
+            method: data.paymentMethod,
+            acquirerId: data.acquirerId,
+            status: 'PENDING',
+          },
+        });
       }
 
       return { sale: newSale, lowStockEvents };

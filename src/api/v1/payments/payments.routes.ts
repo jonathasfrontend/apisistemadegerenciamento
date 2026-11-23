@@ -13,6 +13,9 @@ const createPaymentSchema = z.object({
     clientId: z.string().uuid('Invalid client ID'),
     amount: z.number().positive('Amount must be positive'),
     method: z.enum(['CASH', 'DEBIT', 'CREDIT', 'PIX', 'LINK', 'WALLET']),
+    // [F1.3] spec:1050 — quando há 2+ adquirentes ativos o confirm exige
+    // escolha explícita; sem isto o 422 ACQUIRER_REQUIRED era inevitável.
+    acquirerId: z.string().uuid().optional(),
     gatewayReference: z.string().optional(),
   }),
 });

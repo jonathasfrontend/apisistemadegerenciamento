@@ -325,14 +325,15 @@ describe('finance catalog CRUD (finance F1.1c)', () => {
       .send({
         name: `Maquininha ${fixture.suffix}`,
         bankKeywords: ['itaú unibanco', 'BB', 'Caixa Econômica'],
-        debitRate: 0.0199,
-        creditRate: 0.0399,
-        installmentRates: { '3': 0.0599, '6': 0.0899 },
+        // spec:557/1071 — taxas são PORCENTAGEM (1.9900), não fração (0.0199).
+        debitRate: 1.99,
+        creditRate: 3.99,
+        installmentRates: { '3': 5.99, '6': 8.99 },
       });
     expect(created.status).toBe(201);
     expect(created.body.data.bankKeywords).toEqual(['ITAU UNIBANCO', 'BB', 'CAIXA ECONOMICA']);
-    expect(created.body.data.installmentRates).toEqual({ '3': 0.0599, '6': 0.0899 });
-    expect(Number(created.body.data.debitRate)).toBeCloseTo(0.0199, 4);
+    expect(created.body.data.installmentRates).toEqual({ '3': 5.99, '6': 8.99 });
+    expect(Number(created.body.data.debitRate)).toBeCloseTo(1.99, 4);
   });
 
   it('15. acquirers CRUD works and cross-tenant access is 404', async () => {
@@ -342,8 +343,8 @@ describe('finance catalog CRUD (finance F1.1c)', () => {
       .send({
         name: `Adquirente ${fixture.suffix}`,
         bankKeywords: [],
-        debitRate: 0.01,
-        creditRate: 0.02,
+        debitRate: 1,
+        creditRate: 2,
       });
     expect(created.status).toBe(201);
     const id = created.body.data.id;
@@ -400,6 +401,19 @@ describe('finance catalog CRUD (finance F1.1c)', () => {
       .get(`${BASE}/cash/registers/${id}`)
       .set('Authorization', authB());
     expect(cross.status).toBe(404);
+  });
+
+  it('16b. acquirer rejeita taxa >= 100 (Decimal(6,4) estouraria no banco)', async () => {
+    const res = await request(app)
+      .post(`${BASE}/acquirers`)
+      .set('Authorization', auth())
+      .send({
+        name: `Taxa alta ${fixture.suffix}`,
+        bankKeywords: [],
+        debitRate: 100,
+        creditRate: 3.99,
+      });
+    expect(res.status).toBe(400);
   });
 
   it('17. catalog write endpoints are 403 without finance.catalog.manage', async () => {

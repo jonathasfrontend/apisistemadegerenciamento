@@ -15,6 +15,9 @@ const createSaleSchema = z.object({
       unitPrice: z.number().positive(),
     })).min(1, 'At least one item is required'),
     paymentMethod: z.enum(['CASH', 'DEBIT', 'CREDIT', 'PIX', 'LINK', 'WALLET']),
+    // [F1.3] spec:1050 — permite escolher a maquininha no PDV quando a empresa
+    // tem mais de uma ativa (o confirm devolve 422 sem escolha explícita).
+    acquirerId: z.string().uuid().optional(),
   }),
 });
 

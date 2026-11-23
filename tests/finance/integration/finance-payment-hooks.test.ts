@@ -12,6 +12,7 @@ import app from '../../../src/app';
 import prisma from '../../../src/config/db';
 import { seedCompanyFinance } from '../../../prisma/seed.finance';
 import { seedTwoTenants, TenantFixture } from '../helpers/tenancy';
+import { financeEvents } from '../../../src/events/finance.events';
 
 const CASH_SESSIONS = '/api/v1/finance/cash/sessions';
 const RECEIVABLES = '/api/v1/finance/card-receivables';
@@ -26,7 +27,11 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
 
   const authA = () => `Bearer ${tokenA}`;
 
-  async function makeUser(label: string, permissions: string[]) {
+  async function makeUser(
+    label: string,
+    permissions: string[],
+    companyId: string = fixture.companyAId
+  ) {
     const records = await Promise.all(
       permissions.map((name) =>
         prisma.permission.upsert({
@@ -50,7 +55,7 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
         passwordHash: await bcrypt.hash('teste123', 4),
         name: label,
         roleId: role.id,
-        companyId: fixture.companyAId,
+        companyId,
       },
     });
     const login = await request(app)
@@ -105,9 +110,12 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
     });
     registerId = register.id;
 
-    const acquirer = await prisma.acquirer.create({
-      data: {
-        companyId: fixture.companyAId,
+    // Criado pela API para exercitar o contrato real de taxas (spec:557/1071:
+    // porcentagem, não fração). Gravação direta no Prisma mascararia o bug.
+    const acquirerRes = await request(app)
+      .post('/api/v1/finance/acquirers')
+      .set('Authorization', authA())
+      .send({
         name: `Maquininha ${fixture.suffix}`,
         bankKeywords: [],
         debitRate: 2,
@@ -116,9 +124,9 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
         settlementDaysDebit: 1,
         settlementDaysCredit: 30,
         anticipates: false,
-      },
-    });
-    acquirerId = acquirer.id;
+      });
+    expect(acquirerRes.status).toBe(201);
+    acquirerId = acquirerRes.body.data.id;
 
     const bank = await prisma.bankAccount.create({
       data: {
@@ -133,9 +141,19 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
     const extra = await makeUser('Financeiro', [
       'finance.cash.operate',
       'finance.receivables.list',
+      'finance.catalog.manage',
     ]);
     tokenA = extra.token;
     userAId = extra.user.id;
+
+    // Usuário B precisa da permissão para provar ISOLAMENTO (200 + data vazia),
+    // não RBAC (403). Sem ela o teste mediria a permissão errada.
+    const extraB = await makeUser(
+      'FinanceiroB',
+      ['finance.receivables.list'],
+      fixture.companyBId
+    );
+    tokenB = extraB.token;
 
     await prisma.financeSettings.update({
       where: { companyId: fixture.companyAId },
@@ -236,7 +254,7 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
     expect(res.status).toBe(200);
 
     const refunds = await prisma.cashMovement.findMany({
-      where: { paymentId: id, type: 'REFUND' },
+      where: { description: `Estorno de pagamento ${id}`, type: 'REFUND' },
     });
     expect(refunds).toHaveLength(1);
     expect(refunds[0].direction).toBe('OUT');
@@ -319,6 +337,7 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
         clientId: fixture.clientAId,
         items: [{ productId: product.id, quantity: 2, unitPrice: 25 }],
         paymentMethod: 'PIX',
+        acquirerId,
       });
     expect(res.status).toBe(201);
 
@@ -329,6 +348,28 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
     expect(payment!.companyId).toBe(fixture.companyAId);
     expect(Number(payment!.amount)).toBe(50);
     expect(payment!.status).toBe('PENDING');
+    expect(payment!.acquirerId).toBe(acquirerId);
+
+    // O 404 do service não pode virar 400 genérico no controller do PDV.
+    const foreign = await prisma.acquirer.create({
+      data: {
+        companyId: fixture.companyBId,
+        name: `PDV Adquirente B ${fixture.suffix}`,
+        bankKeywords: [],
+        debitRate: 1,
+        creditRate: 2,
+      },
+    });
+    const cross = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', authA())
+      .send({
+        clientId: fixture.clientAId,
+        items: [{ productId: product.id, quantity: 1, unitPrice: 25 }],
+        paymentMethod: 'CASH',
+        acquirerId: foreign.id,
+      });
+    expect(cross.status).toBe(404);
   });
 
   // ------------------------------------------------------------- legado/tenant
@@ -345,5 +386,122 @@ describe('payment hooks and card receivables (finance F1.3)', () => {
   it('confirm de pagamento de outro tenant devolve 404', async () => {
     const res = await confirm(fixture.paymentBId);
     expect(res.status).toBe(404);
+  });
+
+  // ------------------------------------------- correções do review independente
+
+  it('confirm de pagamento REFUNDED devolve 409 PAYMENT_REFUNDED', async () => {
+    // Garante exatamente uma sessão OPEN: o refund de dinheiro exige caixa aberto.
+    await prisma.cashSession.updateMany({
+      where: { companyId: fixture.companyAId, status: 'OPEN' },
+      data: { status: 'CLOSED', closedAt: new Date() },
+    });
+    await openSession();
+    const id = await createPayment('CASH', 60);
+    expect((await confirm(id)).status).toBe(200);
+    const refund = await request(app)
+      .post(`/api/v1/payments/${id}/refund`)
+      .set('Authorization', authA());
+    expect(refund.status).toBe(200);
+
+    const again = await confirm(id);
+    expect(again.status).toBe(409);
+    expect(again.body.code).toBe('PAYMENT_REFUNDED');
+  });
+
+  it('POST /payments aceita acquirerId do tenant e rejeita o de outro tenant', async () => {
+    const valid = await request(app)
+      .post('/api/v1/payments')
+      .set('Authorization', authA())
+      .send({ clientId: fixture.clientAId, amount: 10, method: 'CREDIT', acquirerId });
+    expect(valid.status).toBe(201);
+    expect(valid.body.data.payment.acquirerId).toBe(acquirerId);
+
+    const foreign = await prisma.acquirer.create({
+      data: {
+        companyId: fixture.companyBId,
+        name: `Adquirente B ${fixture.suffix}`,
+        bankKeywords: [],
+        debitRate: 1,
+        creditRate: 2,
+      },
+    });
+    const cross = await request(app)
+      .post('/api/v1/payments')
+      .set('Authorization', authA())
+      .send({ clientId: fixture.clientAId, amount: 10, method: 'CREDIT', acquirerId: foreign.id });
+    expect(cross.status).toBe(404);
+  });
+
+  it('GET /card-receivables com from/to inválido devolve 400', async () => {
+    const res = await request(app)
+      .get(`${RECEIVABLES}?from=not-a-date`)
+      .set('Authorization', authA());
+    expect(res.status).toBe(400);
+
+    const to = await request(app)
+      .get(`${RECEIVABLES}?to=2026-13-99`)
+      .set('Authorization', authA());
+    expect(to.status).toBe(400);
+  });
+
+  it('refund de cartão devolve feeAmount/netAmount zerados na resposta', async () => {
+    const id = await createPayment('CREDIT', 100, 2);
+    expect((await confirm(id)).status).toBe(200);
+
+    const res = await request(app)
+      .post(`/api/v1/payments/${id}/refund`)
+      .set('Authorization', authA());
+    expect(res.status).toBe(200);
+    expect(res.body.data.payment.feeAmount).toBeNull();
+    expect(res.body.data.payment.netAmount).toBeNull();
+  });
+
+  it('payment.confirmed é emitido uma vez por confirmação efetiva', async () => {
+    let count = 0;
+    const unsubscribe = financeEvents.on('payment.confirmed', () => {
+      count += 1;
+    });
+    try {
+      const id = await createPayment('PIX', 12);
+      expect((await confirm(id)).status).toBe(200);
+      expect(count).toBe(1);
+      // Segunda confirmação é idempotente: não reemite o evento.
+      expect((await confirm(id)).status).toBe(200);
+      expect(count).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('CASH sem sessão com requireOpenCashSession=false confirma e estorna sem movimento', async () => {
+    await prisma.financeSettings.update({
+      where: { companyId: fixture.companyAId },
+      data: { requireOpenCashSession: false },
+    });
+    await prisma.cashSession.updateMany({
+      where: { companyId: fixture.companyAId, status: 'OPEN' },
+      data: { status: 'CLOSED', closedAt: new Date() },
+    });
+    try {
+      const id = await createPayment('CASH', 33);
+      expect((await confirm(id)).status).toBe(200);
+      expect(await prisma.cashMovement.count({ where: { paymentId: id } })).toBe(0);
+
+      const refund = await request(app)
+        .post(`/api/v1/payments/${id}/refund`)
+        .set('Authorization', authA());
+      expect(refund.status).toBe(200);
+      expect(
+        await prisma.cashMovement.count({
+          where: { description: `Estorno de pagamento ${id}` },
+        })
+      ).toBe(0);
+    } finally {
+      await prisma.financeSettings.update({
+        where: { companyId: fixture.companyAId },
+        data: { requireOpenCashSession: true },
+      });
+    }
   });
 });

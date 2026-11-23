@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { SalesService } from './sales.service';
 import { logger } from '../../../utils/logger';
+import { AppError } from '../../../middlewares/error.handler';
 
 export class SalesController {
   private salesService: SalesService;
@@ -16,7 +17,14 @@ export class SalesController {
       res.status(201).json({ status: 'success', data: { sale } });
     } catch (error: any) {
       logger.error('Error creating sale:', error);
-      res.status(400).json({ status: 'error', message: error.message || 'Failed to create sale' });
+      // Mesmo contrato de Payments: AppError preserva status/código (ex.: 404
+      // de acquirer de outro tenant) em vez de virar 400 genérico.
+      const status = error instanceof AppError ? error.statusCode : 400;
+      res.status(status).json({
+        status: 'error',
+        message: error.message || 'Failed to create sale',
+        ...(error instanceof AppError && error.code ? { code: error.code } : {}),
+      });
     }
   };
 
