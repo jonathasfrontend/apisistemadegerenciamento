@@ -7,6 +7,7 @@
  * edições feitas pelo usuário (desativar categoria, ajustar configuração etc).
  */
 import { PrismaClient } from '@prisma/client';
+import { resolveFinanceWriteTarget } from '../scripts/finance-cli-guard';
 
 export const DEFAULT_CASH_REGISTER_NAME = 'Caixa Principal';
 
@@ -64,6 +65,8 @@ export interface FinanceSeedResult {
   settingsCreated: boolean;
   registerCreated: boolean;
   categoriesCreated: number;
+  /** Nomes padrão já ocupados por categoria de usuário (isSystem=false). */
+  collisions: string[];
 }
 
 export interface SeedFinanceOptions {
@@ -76,6 +79,7 @@ export interface SeedFinanceSummary {
   settingsCreated: number;
   registersCreated: number;
   categoriesCreated: number;
+  collisionCount: number;
   results: FinanceSeedResult[];
 }
 
@@ -87,13 +91,24 @@ export async function seedCompanyFinance(
   client: PrismaClient,
   companyId: string
 ): Promise<FinanceSeedResult> {
-  const [settingsBefore, registerBefore, categoriesBefore] = await Promise.all([
-    client.financeSettings.count({ where: { companyId } }),
-    client.cashRegister.count({
-      where: { companyId, name: DEFAULT_CASH_REGISTER_NAME },
-    }),
-    client.financialCategory.count({ where: { companyId, isSystem: true } }),
-  ]);
+  const [settingsBefore, registerBefore, categoriesBefore, existingCategories] =
+    await Promise.all([
+      client.financeSettings.count({ where: { companyId } }),
+      client.cashRegister.count({
+        where: { companyId, name: DEFAULT_CASH_REGISTER_NAME },
+      }),
+      client.financialCategory.count({ where: { companyId, isSystem: true } }),
+      client.financialCategory.findMany({
+        where: { companyId },
+        select: { kind: true, name: true, isSystem: true },
+      }),
+    ]);
+
+  const occupied = new Set(
+    existingCategories
+      .filter((category) => !category.isSystem)
+      .map((category) => `${category.kind}\u0000${category.name}`)
+  );
 
   await client.financeSettings.upsert({
     where: { companyId },
@@ -109,7 +124,12 @@ export async function seedCompanyFinance(
     create: { companyId, name: DEFAULT_CASH_REGISTER_NAME, isActive: true },
   });
 
+  const collisions: string[] = [];
+
   for (const category of DEFAULT_CATEGORIES) {
+    if (occupied.has(`${category.kind}\u0000${category.name}`)) {
+      collisions.push(category.name);
+    }
     await client.financialCategory.upsert({
       where: {
         companyId_kind_name: {
@@ -144,6 +164,7 @@ export async function seedCompanyFinance(
     settingsCreated: settingsAfter > settingsBefore,
     registerCreated: registerAfter > registerBefore,
     categoriesCreated: categoriesAfter - categoriesBefore,
+    collisions,
   };
 }
 
@@ -171,6 +192,7 @@ export async function seedFinance(
     settingsCreated: results.reduce((sum, r) => sum + (r.settingsCreated ? 1 : 0), 0),
     registersCreated: results.reduce((sum, r) => sum + (r.registerCreated ? 1 : 0), 0),
     categoriesCreated: results.reduce((sum, r) => sum + r.categoriesCreated, 0),
+    collisionCount: results.reduce((sum, r) => sum + r.collisions.length, 0),
     results,
   };
 }
@@ -182,13 +204,31 @@ function isDirectExecution(): boolean {
 
 if (isDirectExecution()) {
   const client = new PrismaClient();
-  seedFinance(client)
+  Promise.resolve()
+    .then(() =>
+      resolveFinanceWriteTarget({
+        databaseUrl: process.env.DATABASE_URL,
+        command: 'seed:finance',
+        argv: process.argv,
+      })
+    )
+    .then((target) =>
+      seedFinance(client, { companyIds: target.companyIds }).then((summary) => {
+        console.log(`   Host: ${target.hostname}`);
+        return summary;
+      })
+    )
     .then((summary) => {
       console.log('✅ Seed financeiro concluído.');
       console.log(`   Empresas ativas processadas: ${summary.companies}`);
       console.log(`   FinanceSettings criados: ${summary.settingsCreated}`);
       console.log(`   Caixa Principal criado: ${summary.registersCreated}`);
       console.log(`   Categorias padrão criadas: ${summary.categoriesCreated}`);
+      if (summary.collisionCount) {
+        console.warn(
+          `   ⚠️  ${summary.collisionCount} categoria(s) padrão colidiu(ram) com categoria de usuário; nomes preservados.`
+        );
+      }
     })
     .catch((error) => {
       console.error('❌ Erro no seed financeiro:', error);

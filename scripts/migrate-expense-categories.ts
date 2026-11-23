@@ -10,6 +10,18 @@
  * cria vínculo duplicado nem apaga dados.
  */
 import { PrismaClient } from '@prisma/client';
+import { resolveFinanceWriteTarget } from './finance-cli-guard';
+
+/**
+ * Se uma categoria sistema não tem `systemCode` (ex.: colisão com categoria
+ * de usuário), o literal do systemCode ainda casa com o nome padrão.
+ * D-F1.9: evita que `Expense.category='CARD_FEES'` fique sem vínculo.
+ */
+export const SYSTEM_CODE_NAME_ALIASES: Readonly<Record<string, string>> = {
+  CARD_FEES: 'Taxas de maquininha',
+  CARD_INVOICE_PAYMENT: 'Pagamento de fatura de cartão',
+  TRANSFER: 'Transferência entre contas',
+};
 
 export interface MigrateExpenseCategoriesOptions {
   /** Restringe a migração a estas empresas. Sem valor = todas. */
@@ -86,10 +98,15 @@ export async function migrateExpenseCategories(
   for (const expense of pending) {
     const prefix = `${expense.companyId}\u0000`;
     const value = expense.category ?? '';
+    const upper = value.trim().toUpperCase();
+    const aliasName = SYSTEM_CODE_NAME_ALIASES[upper];
     const categoryId =
-      bySystemCode.get(prefix + value.trim().toUpperCase()) ??
+      bySystemCode.get(prefix + upper) ??
       byName.get(prefix + value) ??
-      byNormalizedName.get(prefix + normalizeCategoryKey(value));
+      byNormalizedName.get(prefix + normalizeCategoryKey(value)) ??
+      (aliasName
+        ? byNormalizedName.get(prefix + normalizeCategoryKey(aliasName))
+        : undefined);
 
     if (!categoryId) {
       noMatch++;
@@ -130,8 +147,21 @@ function isDirectExecution(): boolean {
 
 if (isDirectExecution()) {
   const client = new PrismaClient();
-  migrateExpenseCategories(client)
-    .then((result) => {
+  Promise.resolve()
+    .then(() =>
+      resolveFinanceWriteTarget({
+        databaseUrl: process.env.DATABASE_URL,
+        command: 'migrate:finance-categories',
+        argv: process.argv,
+      })
+    )
+    .then((target) =>
+      migrateExpenseCategories(client, { companyIds: target.companyIds }).then(
+        (result) => ({ result, hostname: target.hostname })
+      )
+    )
+    .then(({ result, hostname }) => {
+      console.log(`   Host: ${hostname}`);
       console.log('✅ Migração de categorias legadas concluída.');
       console.log(`   Despesas examinadas: ${result.scanned}`);
       console.log(`   Vinculadas: ${result.linked}`);
