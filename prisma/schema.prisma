@@ -79,6 +79,49 @@ enum NotificationStatus {
   FAILED
 }
 
+// F1 (spec §5.2): enums do módulo financeiro. F2/F3 ficam de fora.
+enum BankAccountType {
+  CHECKING
+  SAVINGS
+  PAYMENT_ACCOUNT
+}
+
+enum CategoryKind {
+  INCOME
+  EXPENSE
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  SALE
+  SUPPLY
+  WITHDRAWAL
+  EXPENSE
+  REFUND
+  ADJUSTMENT
+}
+
+enum CashDirection {
+  IN
+  OUT
+}
+
+enum RecurrenceInterval {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum EntrySource {
+  MANUAL
+  RECURRING
+  BANK_RECONCILIATION
+}
+
 // =============================================
 // AUTHENTICATION & USERS
 // =============================================
@@ -94,24 +137,35 @@ model Company {
   updatedAt DateTime @updatedAt
 
   // Relations
-  users          User[]
-  payments       Payment[]
-  expenses       Expense[]
-  sales          Sale[]
+  users               User[]
+  payments            Payment[]
+  expenses            Expense[]
+  sales               Sale[]
   // 0B.1: relações inversas dos modelos que passam a ser tenant-scoped.
-  refreshTokens  RefreshToken[]
-  staff          Staff[]
-  clients        Client[]
-  services       Service[]
-  appointments   Appointment[]
-  commissions    Commission[]
-  products       Product[]
-  stockMovements StockMovement[]
-  saleItems      SaleItem[]
-  notifications  Notification[]
-  reviews        Review[]
-  auditLogs      AuditLog[]
-  waitlist       Waitlist[]
+  refreshTokens       RefreshToken[]
+  staff               Staff[]
+  clients             Client[]
+  services            Service[]
+  appointments        Appointment[]
+  commissions         Commission[]
+  products            Product[]
+  stockMovements      StockMovement[]
+  saleItems           SaleItem[]
+  notifications       Notification[]
+  reviews             Review[]
+  auditLogs           AuditLog[]
+  waitlist            Waitlist[]
+  // F1: relações inversas do módulo financeiro
+  financeSettings     FinanceSettings?
+  financialCategories FinancialCategory[]
+  suppliers           Supplier[]
+  bankAccounts        BankAccount[]
+  acquirers           Acquirer[]
+  cashRegisters       CashRegister[]
+  cashSessions        CashSession[]
+  cashMovements       CashMovement[]
+  otherIncomes        OtherIncome[]
+  cardReceivables     CardReceivable[]
 
   @@map("companies")
 }
@@ -132,13 +186,18 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  company             Company        @relation(fields: [companyId], references: [id])
-  role                Role?          @relation(fields: [roleId], references: [id])
-  refreshTokens       RefreshToken[]
-  staff               Staff?
-  auditLogs           AuditLog[]
-  createdAppointments Appointment[]  @relation("CreatedBy")
-  notifications       Notification[]
+  company              Company        @relation(fields: [companyId], references: [id])
+  role                 Role?          @relation(fields: [roleId], references: [id])
+  refreshTokens        RefreshToken[]
+  staff                Staff?
+  auditLogs            AuditLog[]
+  createdAppointments  Appointment[]  @relation("CreatedBy")
+  notifications        Notification[]
+  // F1: relações inversas de caixa (quem abriu/fechou, quem criou/anulou movimento)
+  cashSessionsOpened   CashSession[]  @relation("CashSessionOpenedBy")
+  cashSessionsClosed   CashSession[]  @relation("CashSessionClosedBy")
+  cashMovementsCreated CashMovement[] @relation("CashMovementCreatedBy")
+  cashMovementsVoided  CashMovement[] @relation("CashMovementVoidedBy")
 
   @@unique([companyId, email])
   @@index([roleId])
@@ -363,18 +422,41 @@ model Payment {
   gatewayResponse  Json?         @map("gateway_response")
   paidAt           DateTime?     @map("paid_at")
 
+  // F1: vínculos com caixa/conta/adquirente/venda + conciliação (spec §5.1)
+  saleId        String?
+  bankAccountId String?
+  acquirerId    String?
+  cashSessionId String?
+  installments  Int         @default(1)
+  feeAmount     Decimal?    @db.Decimal(14, 2)
+  netAmount     Decimal?    @db.Decimal(14, 2)
+  isReconciled  Boolean     @default(false)
+  reconciledAt  DateTime?
+  canceledAt    DateTime?
+  source        EntrySource @default(MANUAL)
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  company     Company      @relation(fields: [companyId], references: [id])
-  appointment Appointment? @relation(fields: [appointmentId], references: [id])
-  client      Client       @relation(fields: [clientId], references: [id])
-  commissions Commission[]
+  company         Company          @relation(fields: [companyId], references: [id])
+  appointment     Appointment?     @relation(fields: [appointmentId], references: [id])
+  client          Client           @relation(fields: [clientId], references: [id])
+  commissions     Commission[]
+  sale            Sale?            @relation(fields: [saleId], references: [id])
+  bankAccount     BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  acquirer        Acquirer?        @relation(fields: [acquirerId], references: [id])
+  cashSession     CashSession?     @relation(fields: [cashSessionId], references: [id])
+  cardReceivables CardReceivable[]
+  cashMovement    CashMovement?
 
   @@index([companyId, status])
+  @@index([companyId, bankAccountId])
+  @@index([companyId, cashSessionId])
+  @@index([companyId, acquirerId, isReconciled])
   @@index([appointmentId])
   @@index([clientId])
+  @@index([saleId])
   @@index([status])
   @@map("payments")
 }
@@ -405,7 +487,7 @@ model Expense {
   id          String    @id @default(uuid())
   companyId   String // F0.2: NOT NULL após backfill (etapa 2)
   description String
-  category    String // "aluguel", "produtos", "salários", "água", "luz"
+  category    String // legado mantido (spec §5.1) — migrate-expense-categories preenche categoryId
   amount      Float
   dueDate     DateTime  @map("due_date")
   paidDate    DateTime? @map("paid_date")
@@ -413,14 +495,42 @@ model Expense {
   isRecurring Boolean   @default(false) @map("is_recurring")
   notes       String?   @db.Text
 
+  // F1: a pagar (spec §5.1). category/bankAccount String legados preservados.
+  categoryId         String?
+  supplierId         String?
+  paidAmount         Decimal?            @db.Decimal(14, 2)
+  paymentMethod      PaymentMethod?
+  bankAccountId      String?
+  installmentGroupId String?
+  installmentNumber  Int?
+  installmentTotal   Int?
+  recurrenceInterval RecurrenceInterval?
+  recurrenceEndsAt   DateTime?           @db.Date
+  recurrenceParentId String?
+  canceledAt         DateTime?
+  source             EntrySource         @default(MANUAL)
+  isReconciled       Boolean             @default(false)
+  reconciledAt       DateTime?
+
   createdAt DateTime @default(now()) @map("created_at")
 
   // Relations
-  company Company @relation(fields: [companyId], references: [id])
+  company            Company            @relation(fields: [companyId], references: [id])
+  financialCategory  FinancialCategory? @relation(fields: [categoryId], references: [id])
+  supplier           Supplier?          @relation(fields: [supplierId], references: [id])
+  bankAccount        BankAccount?       @relation(fields: [bankAccountId], references: [id])
+  recurrenceParent   Expense?           @relation("ExpenseRecurrence", fields: [recurrenceParentId], references: [id])
+  recurrenceChildren Expense[]          @relation("ExpenseRecurrence")
+  cashMovement       CashMovement?
 
+  @@unique([recurrenceParentId, dueDate])
   @@index([companyId, isPaid, dueDate])
+  @@index([companyId, bankAccountId])
+  @@index([companyId, installmentGroupId])
   @@index([dueDate])
   @@index([category])
+  @@index([categoryId])
+  @@index([supplierId])
   @@map("expenses")
 }
 
@@ -491,9 +601,10 @@ model Sale {
   createdAt DateTime @default(now()) @map("created_at")
 
   // Relations
-  company Company    @relation(fields: [companyId], references: [id])
-  client  Client?    @relation(fields: [clientId], references: [id])
-  items   SaleItem[]
+  company  Company    @relation(fields: [companyId], references: [id])
+  client   Client?    @relation(fields: [clientId], references: [id])
+  items    SaleItem[]
+  payments Payment[] // F1 (decisão 4A): Payment.saleId
 
   @@index([companyId])
   @@index([clientId])
@@ -632,4 +743,256 @@ model Waitlist {
   @@index([companyId])
   @@index([isContacted])
   @@map("waitlist")
+}
+
+// =============================================
+// F1 — MÓDULO FINANCEIRO (Fase 1)
+// Fonte: FINANCEIRO_IMPLEMENTACAO.md §5.2 + Apêndice B.
+// Modelos F2/F3 (Reconciliation, BankTransaction, ImportBatch, CreditCard)
+// ficam FORA: relações inversas que os citam foram omitidas de propósito.
+// =============================================
+
+model FinanceSettings {
+  id        String  @id @default(uuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  requireOpenCashSession Boolean @default(true)
+  cashClosingTolerance   Decimal @default(0) @db.Decimal(14, 2)
+  matchWindowDays        Int     @default(3)
+  autoConfirmScore       Int?
+  cardTolerancePct       Decimal @default(1.5) @db.Decimal(5, 2)
+  fileRetentionDays      Int     @default(30)
+  enableOverdueAlerts    Boolean @default(true) // F1 Task 9: job de vencimento
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("finance_settings")
+}
+
+model FinancialCategory {
+  id         String              @id @default(uuid())
+  companyId  String
+  company    Company             @relation(fields: [companyId], references: [id])
+  name       String
+  kind       CategoryKind
+  parentId   String?
+  parent     FinancialCategory?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children   FinancialCategory[] @relation("CategoryTree")
+  color      String?
+  isSystem   Boolean             @default(false)
+  systemCode String?
+  isActive   Boolean             @default(true)
+  sortOrder  Int                 @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  expenses      Expense[]
+  otherIncomes  OtherIncome[]
+  cashMovements CashMovement[]
+
+  @@unique([companyId, kind, name])
+  @@index([companyId, kind, isActive])
+  @@map("financial_categories")
+}
+
+model Supplier {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  name      String
+  document  String?
+  phone     String?
+  email     String?
+  notes     String?
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  expenses Expense[]
+
+  @@index([companyId, isActive])
+  @@map("suppliers")
+}
+
+model BankAccount {
+  id                 String          @id @default(uuid())
+  companyId          String
+  company            Company         @relation(fields: [companyId], references: [id])
+  name               String
+  bankCode           String?
+  bankName           String?
+  agency             String?
+  accountNumber      String?
+  type               BankAccountType @default(CHECKING)
+  ofxBankId          String?
+  ofxAccountId       String?
+  initialBalance     Decimal         @default(0) @db.Decimal(14, 2)
+  initialBalanceDate DateTime        @db.Date
+  color              String?
+  isActive           Boolean         @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments      Payment[]
+  expenses      Expense[]
+  cashMovements CashMovement[]
+  otherIncomes  OtherIncome[]
+
+  @@index([companyId, isActive])
+  @@map("bank_accounts")
+}
+
+model Acquirer {
+  id                    String   @id @default(uuid())
+  companyId             String
+  company               Company  @relation(fields: [companyId], references: [id])
+  name                  String
+  bankKeywords          String[]
+  debitRate             Decimal  @default(0) @db.Decimal(6, 4)
+  creditRate            Decimal  @default(0) @db.Decimal(6, 4)
+  creditInstallmentRate Decimal? @db.Decimal(6, 4)
+  installmentRates      Json?
+  settlementDaysDebit   Int      @default(1)
+  settlementDaysCredit  Int      @default(30)
+  anticipates           Boolean  @default(false)
+  defaultBankAccountId  String?
+  isActive              Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cardReceivables CardReceivable[]
+  Payment         Payment[]
+
+  @@index([companyId, isActive])
+  @@map("acquirers")
+}
+
+model CashRegister {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  name      String
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  sessions CashSession[]
+
+  @@unique([companyId, name])
+  @@map("cash_registers")
+}
+
+model CashSession {
+  id         String            @id @default(uuid())
+  companyId  String
+  company    Company           @relation(fields: [companyId], references: [id])
+  registerId String
+  register   CashRegister      @relation(fields: [registerId], references: [id])
+  status     CashSessionStatus @default(OPEN)
+
+  openedById     String
+  openedBy       User     @relation("CashSessionOpenedBy", fields: [openedById], references: [id])
+  openedAt       DateTime @default(now())
+  openingBalance Decimal  @default(0) @db.Decimal(14, 2)
+
+  closedById   String?
+  closedBy     User?     @relation("CashSessionClosedBy", fields: [closedById], references: [id])
+  closedAt     DateTime?
+  expectedCash Decimal?  @db.Decimal(14, 2)
+  countedCash  Decimal?  @db.Decimal(14, 2)
+  difference   Decimal?  @db.Decimal(14, 2)
+  closingNotes String?
+  summary      Json?
+
+  movements CashMovement[]
+  payments  Payment[]
+
+  @@index([companyId, status])
+  @@index([registerId, status])
+  @@map("cash_sessions")
+}
+
+model CashMovement {
+  id            String             @id @default(uuid())
+  companyId     String
+  company       Company            @relation(fields: [companyId], references: [id])
+  sessionId     String
+  session       CashSession        @relation(fields: [sessionId], references: [id])
+  type          CashMovementType
+  direction     CashDirection
+  amount        Decimal            @db.Decimal(14, 2) // sempre positivo (CHECK no SQL)
+  description   String
+  occurredAt    DateTime           @default(now())
+  categoryId    String?
+  category      FinancialCategory? @relation(fields: [categoryId], references: [id])
+  paymentId     String?            @unique
+  payment       Payment?           @relation(fields: [paymentId], references: [id])
+  expenseId     String?            @unique
+  expense       Expense?           @relation(fields: [expenseId], references: [id])
+  bankAccountId String?
+  isReconciled  Boolean            @default(false)
+  reconciledAt  DateTime?
+  createdById   String
+  createdBy     User               @relation("CashMovementCreatedBy", fields: [createdById], references: [id])
+  voidedAt      DateTime?
+  voidedById    String?
+  voidedBy      User?              @relation("CashMovementVoidedBy", fields: [voidedById], references: [id])
+  voidReason    String?
+  BankAccount   BankAccount?       @relation(fields: [bankAccountId], references: [id])
+
+  @@index([sessionId, voidedAt])
+  @@index([companyId, occurredAt])
+  @@map("cash_movements")
+}
+
+model OtherIncome {
+  id            String             @id @default(uuid())
+  companyId     String
+  company       Company            @relation(fields: [companyId], references: [id])
+  description   String
+  amount        Decimal            @db.Decimal(14, 2)
+  receivedAt    DateTime           @db.Date
+  categoryId    String?
+  category      FinancialCategory? @relation(fields: [categoryId], references: [id])
+  bankAccountId String?
+  notes         String?
+  source        EntrySource        @default(MANUAL)
+  isReconciled  Boolean            @default(false)
+  reconciledAt  DateTime?
+  createdById   String?
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  BankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  @@index([companyId, receivedAt])
+  @@map("other_incomes")
+}
+
+model CardReceivable {
+  id                String    @id @default(uuid())
+  companyId         String
+  company           Company   @relation(fields: [companyId], references: [id])
+  paymentId         String
+  payment           Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  acquirerId        String
+  acquirer          Acquirer  @relation(fields: [acquirerId], references: [id])
+  installmentNumber Int
+  installmentTotal  Int
+  grossAmount       Decimal   @db.Decimal(14, 2)
+  feeAmount         Decimal   @db.Decimal(14, 2)
+  netAmount         Decimal   @db.Decimal(14, 2)
+  expectedDate      DateTime  @db.Date
+  isReconciled      Boolean   @default(false)
+  reconciledAt      DateTime?
+
+  @@unique([paymentId, installmentNumber])
+  @@index([companyId, isReconciled, expectedDate])
+  @@map("card_receivables")
 }
