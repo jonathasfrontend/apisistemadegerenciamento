@@ -134,11 +134,12 @@ describe('finance seed and legacy category migration (finance F1.1b)', () => {
 
   it('links exact legacy categories, never clears Expense.category and leaves no-match untouched', async () => {
     const suffix = fixture.suffix;
+    // 'Aluguel' foi desativado no teste de idempotência; usar categoria ativa.
     const exact = await prisma.expense.create({
       data: {
         companyId: fixture.companyAId,
-        description: `Aluguel ${suffix}`,
-        category: 'Aluguel',
+        description: `Marketing ${suffix}`,
+        category: 'Marketing',
         amount: 100,
         dueDate: new Date('2026-11-01T00:00:00.000Z'),
       },
@@ -176,7 +177,7 @@ describe('finance seed and legacy category migration (finance F1.1b)', () => {
     });
     const byId = new Map(after.map((e) => [e.id, e]));
 
-    expect(byId.get(exact.id)!.category).toBe('Aluguel');
+    expect(byId.get(exact.id)!.category).toBe('Marketing');
     expect(byId.get(exact.id)!.categoryId).not.toBeNull();
     expect(byId.get(byCode.id)!.category).toBe('CARD_FEES');
     expect(byId.get(byCode.id)!.categoryId).not.toBeNull();

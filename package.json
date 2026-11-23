@@ -14,6 +14,8 @@
     "prisma:migrate:prod": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx prisma/seed.ts",
+    "seed:finance": "tsx prisma/seed.finance.ts",
+    "migrate:finance-categories": "tsx scripts/migrate-expense-categories.ts",
     "migrate:payments": "tsx scripts/migrate-payments.ts",
     "test": "jest --testPathIgnorePatterns=integration --passWithNoTests",
     "test:integration": "node scripts/run-integration-tests.mjs",
