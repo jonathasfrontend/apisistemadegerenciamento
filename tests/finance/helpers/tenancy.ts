@@ -59,6 +59,10 @@ const TEST_PERMISSIONS = [
   'reviews.read', 'waitlist.read', 'waitlist.create',
   'reports.read', 'users.list', 'users.read', 'users.create', 'roles.read', 'roles.assign',
   'companies.read', 'companies.create', 'companies.update',
+  // F1.1c: o mesmo papel Admin da fixture precisa das permissões financeiras
+  // para exercitar os endpoints de cadastro nos testes de integração.
+  'finance.dashboard', 'finance.settings', 'finance.catalog.manage',
+  'finance.cash.operate', 'finance.bank.view',
 ];
 
 export async function seedTwoTenants(): Promise<TenantFixture> {
