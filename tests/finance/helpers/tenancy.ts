@@ -63,6 +63,8 @@ const TEST_PERMISSIONS = [
   // para exercitar os endpoints de cadastro nos testes de integração.
   'finance.dashboard', 'finance.settings', 'finance.catalog.manage',
   'finance.cash.operate', 'finance.bank.view',
+  // F1.6: leitura do dashboard financeiro.
+  'finance.reports',
   // F1.2: o Admin da fixture também precisa reabrir e ver todos os turnos.
   'finance.cash.view-all', 'finance.cash.reopen',
   // F1.4: a fachada A pagar usa as mesmas 5 permissões do seed de produção.
