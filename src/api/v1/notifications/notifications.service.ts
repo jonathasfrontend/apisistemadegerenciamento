@@ -24,17 +24,17 @@ interface NotifyTarget {
 
 /**
  * Cria a notificação in-app para cada usuário alvo.
- * Best-effort: falha nunca propaga para quem chamou.
  * 0B.1: companyId é obrigatório — notificação nunca cruza a fronteira do tenant.
+ * Retorna quantas linhas foram inseridas (skipDuplicates exclui duplicatas).
  */
 async function createNotifications(
   users: { id: string; email: string }[],
   payload: NotifyPayload,
   companyId: string
-): Promise<void> {
-  if (users.length === 0) return;
+): Promise<number> {
+  if (users.length === 0) return 0;
 
-  await prisma.notification.createMany({
+  const result = await prisma.notification.createMany({
     data: users.map((u) => ({
       userId: u.id,
       companyId,
@@ -50,26 +50,28 @@ async function createNotifications(
     // Chave duplicada (mesmo usuário + mesmo evento) é ignorada, não dá erro.
     skipDuplicates: true,
   });
+  return result.count;
 }
 
-/** Notifica usuários específicos. Usuários inativos não recebem. */
+/** Notifica usuários específicos. Usuários inativos não recebem. Best-effort: falha não propaga. */
 export async function notifyUsers(
   userIds: string[],
   payload: NotifyPayload,
   companyId: string
-): Promise<void> {
+): Promise<number> {
   try {
     const ids = [...new Set(userIds.filter(Boolean))];
-    if (ids.length === 0) return;
+    if (ids.length === 0) return 0;
 
     const users = await prisma.user.findMany({
       where: { id: { in: ids }, isActive: true, companyId },
       select: { id: true, email: true },
     });
 
-    await createNotifications(users, payload, companyId);
+    return await createNotifications(users, payload, companyId);
   } catch (error) {
     console.error('[notifications] Falha ao criar notificações:', error);
+    return 0;
   }
 }
 

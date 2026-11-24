@@ -16,6 +16,8 @@ const startServer = async () => {
     // Fila de notificações (BullMQ) + reconciliador de horário.
     // Import dinâmico + try/catch: Redis fora do ar NÃO pode derrubar a API.
     let notificationWorker: { close: () => Promise<void> } | undefined;
+    let financeRecurringWorker: { close: () => Promise<void> } | undefined;
+    let financeOverdueWorker: { close: () => Promise<void> } | undefined;
     try {
       const { notificationWorker: worker } = await import('./jobs/notification.worker');
       const { startAppointmentStartReconciler } = await import('./jobs/appointment-start');
@@ -24,6 +26,22 @@ const startServer = async () => {
       logger.info('✓ Reconciliador de agendamento iniciado');
     } catch (error: any) {
       logger.warn('Fila de notificações indisponível (Redis):', error?.message);
+    }
+
+    try {
+      const { startFinanceRecurringWorker } = await import('./jobs/finance-recurring');
+      financeRecurringWorker = startFinanceRecurringWorker();
+      logger.info('✓ Job de recorrência financeira iniciado');
+    } catch (error: any) {
+      logger.warn('Job de recorrência financeira indisponível (Redis):', error?.message);
+    }
+
+    try {
+      const { startFinanceOverdueWorker } = await import('./jobs/finance-overdue');
+      financeOverdueWorker = startFinanceOverdueWorker();
+      logger.info('✓ Job de alerta de vencimento financeiro iniciado');
+    } catch (error: any) {
+      logger.warn('Job de alerta de vencimento financeiro indisponível (Redis):', error?.message);
     }
 
     // Start server
@@ -43,6 +61,14 @@ const startServer = async () => {
         if (notificationWorker) {
           await notificationWorker.close().catch(() => undefined);
           logger.info('Notification worker closed');
+        }
+        if (financeRecurringWorker) {
+          await financeRecurringWorker.close().catch(() => undefined);
+          logger.info('Finance recurring worker closed');
+        }
+        if (financeOverdueWorker) {
+          await financeOverdueWorker.close().catch(() => undefined);
+          logger.info('Finance overdue worker closed');
         }
 
         await prisma.$disconnect();
