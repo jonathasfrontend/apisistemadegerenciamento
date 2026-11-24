@@ -107,7 +107,8 @@ export class ExpensesService {
     });
   }
 
-  private async assertScoped(id: string, companyId: string): Promise<void> {
+  /** [F1.4] Visibilidade aberta para a fachada /payables; lógica inalterada. */
+  async assertScoped(id: string, companyId: string): Promise<void> {
     const found = await prisma.expense.findFirst({ where: { id, companyId }, select: { id: true } });
     if (!found) throw new AppError('Expense not found', 404);
   }

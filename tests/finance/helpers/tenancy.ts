@@ -65,6 +65,9 @@ const TEST_PERMISSIONS = [
   'finance.cash.operate', 'finance.bank.view',
   // F1.2: o Admin da fixture também precisa reabrir e ver todos os turnos.
   'finance.cash.view-all', 'finance.cash.reopen',
+  // F1.4: a fachada A pagar usa as mesmas 5 permissões do seed de produção.
+  'finance.payables.list', 'finance.payables.create', 'finance.payables.update',
+  'finance.payables.pay', 'finance.payables.delete',
 ];
 
 export async function seedTwoTenants(): Promise<TenantFixture> {
