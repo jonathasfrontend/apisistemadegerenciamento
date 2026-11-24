@@ -9,4 +9,7 @@ module.exports = {
   testMatch: ['**/tests/finance/integration/**/*.test.ts'],
   testPathIgnorePatterns: ['/node_modules/'],
   maxWorkers: 1,
+  // [F2.0] Aborta a suite se o DATABASE_URL efetivo nao for o banco local
+  // de teste (protege contra o dotenv apontar para o .env/Neon).
+  setupFiles: ['<rootDir>/tests/finance/integration/setup.db-guard.ts'],
 };

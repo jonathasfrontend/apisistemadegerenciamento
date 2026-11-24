@@ -47,7 +47,9 @@ try {
   if (exitCode === 0) {
     exitCode = run(
       'npx',
-      ['jest', '--config', 'jest.integration.config.js', '--runInBand'],
+      // [F2.0] --forceExit: com Redis no ar, o BullMQ mantem handle aberto e
+      // o Jest nao encerra (suite verde, processo travado). Ver AUDIT 17.4.
+      ['jest', '--config', 'jest.integration.config.js', '--runInBand', '--forceExit'],
       'jest integração'
     );
   }
