@@ -12,6 +12,7 @@
 import { Prisma, ReconTargetType } from '@prisma/client';
 import prisma from '../../../config/db';
 import { toCents } from '../money';
+import { normalizeText } from '../text';
 import { type ScoreCandidate } from './scoring';
 
 export interface Candidate extends ScoreCandidate {
@@ -110,13 +111,31 @@ export async function loadCandidates(
     }
 
     // CardReceivable — janela um pouco mais larga conforme §7.6.3.
+    // §7.6.3.1 exige a adquirente identificada pela descrição do extrato:
+    // keywords de `Acquirer.bankKeywords` casadas sobre a descrição normalizada.
     const cardFrom = new Date(tx.postedAt.getTime() - (cfg.windowDays + 2) * DAY);
     const cardTo = new Date(tx.postedAt.getTime() + 2 * DAY);
+    const description = normalizeText(tx.normalizedDescription);
+    const acquirers = await prisma.acquirer.findMany({
+      where: { companyId, isActive: true },
+      select: { id: true, bankKeywords: true },
+    });
+    const matchedAcquirerIds = acquirers
+      .filter((a) =>
+        a.bankKeywords.some((keyword) => {
+          const normalized = normalizeText(keyword);
+          return normalized.length > 0 && description.includes(normalized);
+        })
+      )
+      .map((a) => a.id);
     const receivables = await prisma.cardReceivable.findMany({
       where: {
         companyId,
         isReconciled: false,
         expectedDate: { gte: cardFrom, lte: cardTo },
+        // Nenhuma keyword casada ⇒ lista vazia ⇒ zero recebíveis. Omitir o
+        // filtro admitiria recebíveis de qualquer adquirente (revisão 2).
+        acquirerId: { in: matchedAcquirerIds },
       },
       select: {
         id: true,

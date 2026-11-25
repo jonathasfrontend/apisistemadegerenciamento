@@ -105,7 +105,6 @@ export const reconcileBankTransactionSchema = z.object({
       )
       .min(1, 'Informe ao menos um alvo')
       .max(50, 'Máximo de 50 alvos por reconciliação'),
-    origin: z.enum(['AUTO', 'RULE', 'MANUAL']).optional(),
   }),
   params: z.object({ id: z.string().trim().min(1).max(60) }),
 });

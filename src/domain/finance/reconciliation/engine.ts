@@ -64,18 +64,27 @@ async function ownedTx(companyId: string, id: string) {
   return tx;
 }
 
+interface TargetInfo {
+  totalCents: number;
+  alreadyCents: number;
+  /** Dados da outra ponta para validação manual de transferência. */
+  transfer?: { bankAccountId: string; signedCents: number; pairId: string | null };
+}
+
 /** Resolve valor/posse de um alvo. `null` = não pertence à empresa (404). */
 async function resolveTarget(
   companyId: string,
-  t: TargetInput
-): Promise<{ totalCents: number; alreadyCents: number } | null> {
+  t: TargetInput,
+  db: Prisma.TransactionClient = prisma
+): Promise<TargetInfo | null> {
   const field = FK_BY_TYPE[t.targetType];
   if (!field) return null;
 
   let row: { value: Prisma.Decimal | number; total: number } | null = null;
+  let transfer: TargetInfo['transfer'];
   switch (t.targetType) {
     case 'PAYMENT': {
-      const p = await prisma.payment.findFirst({
+      const p = await db.payment.findFirst({
         where: { id: t.targetId, companyId },
         select: { amount: true, reconciliations: { select: { amount: true } } },
       });
@@ -83,7 +92,7 @@ async function resolveTarget(
       break;
     }
     case 'CARD_RECEIVABLE': {
-      const r = await prisma.cardReceivable.findFirst({
+      const r = await db.cardReceivable.findFirst({
         where: { id: t.targetId, companyId },
         select: { netAmount: true, reconciliations: { select: { amount: true } } },
       });
@@ -91,7 +100,7 @@ async function resolveTarget(
       break;
     }
     case 'EXPENSE': {
-      const e = await prisma.expense.findFirst({
+      const e = await db.expense.findFirst({
         where: { id: t.targetId, companyId },
         select: { paidAmount: true, amount: true, reconciliations: { select: { amount: true } } },
       });
@@ -104,7 +113,7 @@ async function resolveTarget(
       break;
     }
     case 'OTHER_INCOME': {
-      const i = await prisma.otherIncome.findFirst({
+      const i = await db.otherIncome.findFirst({
         where: { id: t.targetId, companyId },
         select: { amount: true, reconciliations: { select: { amount: true } } },
       });
@@ -112,7 +121,7 @@ async function resolveTarget(
       break;
     }
     case 'CASH_MOVEMENT': {
-      const m = await prisma.cashMovement.findFirst({
+      const m = await db.cashMovement.findFirst({
         where: { id: t.targetId, companyId },
         select: { amount: true, reconciliations: { select: { amount: true } } },
       });
@@ -120,14 +129,24 @@ async function resolveTarget(
       break;
     }
     case 'TRANSFER': {
-      const p = await prisma.bankTransaction.findFirst({
+      const p = await db.bankTransaction.findFirst({
         where: { id: t.targetId, companyId },
-        select: { amount: true, transferPairId: true, reconciliations: { select: { amount: true } } },
+        select: {
+          amount: true,
+          bankAccountId: true,
+          transferPairId: true,
+          reconciliations: { select: { amount: true } },
+        },
       });
       if (p) {
         row = {
           value: Math.abs(toCents(p.amount)),
           total: p.reconciliations.reduce((a, r) => a + toCents(r.amount), 0),
+        };
+        transfer = {
+          bankAccountId: p.bankAccountId,
+          signedCents: toCents(p.amount),
+          pairId: p.transferPairId,
         };
       }
       break;
@@ -136,7 +155,28 @@ async function resolveTarget(
       return null;
   }
   if (!row) return null;
-  return { totalCents: toCents(row.value), alreadyCents: row.total };
+  return { totalCents: toCents(row.value), alreadyCents: row.total, transfer };
+}
+
+/**
+ * [F2.5] Guarda de concorrência (revisão 98291b5): `updateMany` condicional
+ * trav a linha e falha se outra transação já mudou `reconciledAmount` desde a
+ * leitura. `count === 0` ⇒ 409, nunca sobrescreve a soma alheia.
+ */
+export async function claimReconciliationSlot(
+  db: Prisma.TransactionClient,
+  companyId: string,
+  id: string,
+  expectedCents: number
+) {
+  const expected = fromCents(expectedCents);
+  const claimed = await db.bankTransaction.updateMany({
+    where: { id, companyId, reconciledAmount: { equals: expected } },
+    data: { reconciledAmount: expected },
+  });
+  if (claimed.count === 0) {
+    throw new AppError('A transação foi alterada por outra operação', 409, 'RECONCILE_CONFLICT');
+  }
 }
 
 /** Recalcula status I4 a partir da soma das reconciliações. */
@@ -147,12 +187,16 @@ function statusFor(absolute: number, sum: number, current: ReconStatus): ReconSt
 }
 
 /** I6: Payment de cartão só é conciliado quando todos os recebíveis estão. */
-async function syncCardPayment(companyId: string, paymentId: string) {
+async function syncCardPayment(
+  companyId: string,
+  paymentId: string,
+  db: Prisma.TransactionClient
+) {
   const [total, done] = await Promise.all([
-    prisma.cardReceivable.count({ where: { companyId, paymentId } }),
-    prisma.cardReceivable.count({ where: { companyId, paymentId, isReconciled: true } }),
+    db.cardReceivable.count({ where: { companyId, paymentId } }),
+    db.cardReceivable.count({ where: { companyId, paymentId, isReconciled: true } }),
   ]);
-  await prisma.payment.updateMany({
+  await db.payment.updateMany({
     where: { id: paymentId, companyId },
     data: {
       isReconciled: total > 0 && total === done,
@@ -166,11 +210,12 @@ async function syncTargetFlag(
   companyId: string,
   type: ReconTargetType,
   targetId: string,
-  totalCents: number
+  totalCents: number,
+  db: Prisma.TransactionClient
 ) {
   const field = FK_BY_TYPE[type];
   if (!field || field === 'pairTransactionId') return;
-  const sum = await prisma.reconciliation.aggregate({
+  const sum = await db.reconciliation.aggregate({
     where: { companyId, [field]: targetId },
     _sum: { amount: true },
   });
@@ -179,22 +224,22 @@ async function syncTargetFlag(
   const where = { id: targetId, companyId };
   switch (type) {
     case 'PAYMENT':
-      await prisma.payment.updateMany({ where, data });
+      await db.payment.updateMany({ where, data });
       break;
     case 'CARD_RECEIVABLE': {
-      await prisma.cardReceivable.updateMany({ where, data });
-      const r = await prisma.cardReceivable.findFirst({ where, select: { paymentId: true } });
-      if (r) await syncCardPayment(companyId, r.paymentId);
+      await db.cardReceivable.updateMany({ where, data });
+      const r = await db.cardReceivable.findFirst({ where, select: { paymentId: true } });
+      if (r) await syncCardPayment(companyId, r.paymentId, db);
       break;
     }
     case 'EXPENSE':
-      await prisma.expense.updateMany({ where, data });
+      await db.expense.updateMany({ where, data });
       break;
     case 'OTHER_INCOME':
-      await prisma.otherIncome.updateMany({ where, data });
+      await db.otherIncome.updateMany({ where, data });
       break;
     case 'CASH_MOVEMENT':
-      await prisma.cashMovement.updateMany({ where, data });
+      await db.cashMovement.updateMany({ where, data });
       break;
     default:
       break;
@@ -221,11 +266,37 @@ export async function reconcile(
   const absolute = Math.abs(toCents(current.amount));
 
   const resolved: ResolvedTarget[] = [];
+  const seenTargets = new Set<string>();
   for (const t of input.targets) {
+    // I5: um mesmo alvo não pode aparecer duas vezes no mesmo request —
+    // isso dribla o teto por alvo e cria duas linhas apontando para ele.
+    const key = `${t.targetType}:${t.targetId}`;
+    if (seenTargets.has(key)) {
+      throw new AppError('Alvo duplicado na mesma reconciliação', 400, 'RECONCILE_TARGET_DUPLICATED');
+    }
+    seenTargets.add(key);
     const cents = toCents(t.amount);
     if (cents <= 0) throw new AppError('Valor do alvo deve ser positivo', 400, 'RECONCILE_AMOUNT_INVALID');
     const info = await resolveTarget(companyId, t);
     if (!info) throw new AppError('Alvo não encontrado', 404, 'RECONCILE_TARGET_NOT_FOUND');
+    if (t.targetType === 'TRANSFER') {
+      const pair = info.transfer;
+      const signed = toCents(current.amount);
+      if (
+        !pair ||
+        t.targetId === id ||
+        pair.pairId !== null ||
+        Math.sign(signed) === Math.sign(pair.signedCents) ||
+        pair.bankAccountId === current.bankAccountId ||
+        cents !== Math.abs(pair.signedCents)
+      ) {
+        throw new AppError(
+          'Transferência inválida: sinais, contas ou valor incompatíveis',
+          422,
+          'RECONCILE_TRANSFER_INVALID'
+        );
+      }
+    }
     resolved.push({
       input: t,
       cents,
@@ -248,7 +319,18 @@ export async function reconcile(
   }
 
   const origin = input.origin ?? 'MANUAL';
+  const transferPair = resolved.find((r) => r.input.targetType === 'TRANSFER');
+  const transferPairId = transferPair?.input.targetId ?? null;
   await prisma.$transaction(async (tx) => {
+    // Ambos os locks antes de qualquer escrita, ordenados por id estável:
+    // A→B e B→A concorrentes não podem travar um ao outro (revisão 2).
+    const locks = [
+      { id, expected: already },
+      ...(transferPair ? [{ id: transferPair.input.targetId, expected: transferPair.alreadyCents }] : []),
+    ].sort((a, b) => a.id.localeCompare(b.id));
+    for (const lock of locks) {
+      await claimReconciliationSlot(tx, companyId, lock.id, lock.expected);
+    }
     for (const r of resolved) {
       await tx.reconciliation.create({
         data: {
@@ -264,7 +346,6 @@ export async function reconcile(
     }
 
     const sum = already + requested;
-    const transferPairId = resolved.find((r) => r.input.targetType === 'TRANSFER')?.input.targetId ?? null;
     await tx.bankTransaction.update({
       where: { id },
       data: {
@@ -275,15 +356,36 @@ export async function reconcile(
     });
 
     for (const r of resolved) {
-      if (r.input.targetType === 'TRANSFER') {
-        await tx.bankTransaction.update({
-          where: { id: r.input.targetId },
-          data: {
-            transferPairId: id,
-            status: 'RECONCILED',
-            reconciledAmount: fromCents(r.totalCents),
-          },
-        });
+      if (r.input.targetType !== 'TRANSFER') {
+        // I5/I6 na mesma transação: flags e somas nunca ficam órfãs se a
+        // escrita principal falhar.
+        await syncTargetFlag(companyId, r.input.targetType, r.input.targetId, r.totalCents, tx);
+        continue;
+      }
+      // I3: a outra ponta também fica RECONCILED e precisa da sua própria
+      // Reconciliation espelho — flags sozinhas não provam a soma.
+      // O lock da ponta já foi tomado no início da transação, em ordem estável.
+      await tx.reconciliation.create({
+        data: {
+          companyId,
+          bankTransactionId: r.input.targetId,
+          targetType: 'TRANSFER',
+          pairTransactionId: id,
+          amount: fromCents(r.cents),
+          origin,
+          createdById: userId,
+        } as Prisma.ReconciliationUncheckedCreateInput,
+      });
+      const linked = await tx.bankTransaction.updateMany({
+        where: { id: r.input.targetId, companyId, transferPairId: null },
+        data: {
+          transferPairId: id,
+          status: 'RECONCILED',
+          reconciledAmount: fromCents(r.alreadyCents + r.cents),
+        },
+      });
+      if (linked.count === 0) {
+        throw new AppError('A ponta da transferência já foi conciliada', 409, 'RECONCILE_CONFLICT');
       }
     }
 
@@ -306,12 +408,6 @@ export async function reconcile(
     });
   });
 
-  for (const r of resolved) {
-    if (r.input.targetType !== 'TRANSFER') {
-      await syncTargetFlag(companyId, r.input.targetType, r.input.targetId, r.totalCents);
-    }
-  }
-
   const updated = await reload(companyId, id);
   return { transaction: updated, created: resolved.length };
 }
@@ -328,9 +424,42 @@ export async function undo(
     .map((r) => r.pairTransactionId!);
 
   await prisma.$transaction(async (db) => {
+    // Trava current e todas as pontas ANTES de qualquer escrita, em ordem
+    // estável de id. Um SELECT sob READ COMMITTED não impede reconciliação
+    // concorrente; travar só current formaria ciclo com undo da outra ponta
+    // (revisão final). count === 0 ⇒ 409.
+    const pairRows = pairs.length
+      ? await db.bankTransaction.findMany({
+          where: { companyId, id: { in: pairs }, transferPairId: id },
+          select: { id: true, reconciledAmount: true },
+        })
+      : [];
+    const locks = [
+      { id, expected: toCents(tx.reconciledAmount) },
+      ...pairRows.map((p) => ({ id: p.id, expected: toCents(p.reconciledAmount) })),
+    ].sort((a, b) => a.id.localeCompare(b.id));
+    for (const lock of locks) {
+      await claimReconciliationSlot(db, companyId, lock.id, lock.expected);
+    }
+    // Revalida o snapshot DENTRO da transação: uma reconciliação confirmada
+    // entre a leitura e aqui não pode ser apagada pelo deleteMany abaixo
+    // (revisão 2). Conjunto de ids igual ⇒ snapshot ainda é válido.
+    const current = await db.reconciliation.findMany({
+      where: { companyId, bankTransactionId: id },
+      select: { id: true },
+    });
+    if (
+      current.length !== tx.reconciliations.length ||
+      current.some((r) => !tx.reconciliations.some((s) => s.id === r.id))
+    ) {
+      throw new AppError('A transação foi alterada por outra operação', 409, 'RECONCILE_CONFLICT');
+    }
     // Reconciliações PRIMEIRO: FK onDelete:SetNull dispara UPDATE nelas quando o
     // alvo é apagado, e o UPDATE viola o CHECK Reconciliation_one_target.
     await db.reconciliation.deleteMany({ where: { companyId, bankTransactionId: id } });
+    // Espelho da transferência vive na outra perna; sem isso ela fica
+    // RECONCILED sem lastro e o undo "zera tudo" só de um lado.
+    await db.reconciliation.deleteMany({ where: { companyId, pairTransactionId: id } });
 
     if (deleteCreatedEntries) {
       for (const r of tx.reconciliations) {
@@ -356,6 +485,23 @@ export async function undo(
       where: { id },
       data: { reconciledAmount: 0, status: 'PENDING', transferPairId: null },
     });
+    // Reverte flags dos alvos dentro da mesma transação: leitura e escrita
+    // das somas não podem ser separadas por outra reconciliação concorrente.
+    const seen = new Set<string>();
+    for (const r of tx.reconciliations) {
+      const field = FK_BY_TYPE[r.targetType];
+      if (!field || field === 'pairTransactionId') continue;
+      const targetId = r[field];
+      if (!targetId || seen.has(`${r.targetType}:${targetId}`)) continue;
+      seen.add(`${r.targetType}:${targetId}`);
+      const info = await resolveTarget(
+        companyId,
+        { targetType: r.targetType, targetId, amount: 1 },
+        db
+      );
+      if (info) await syncTargetFlag(companyId, r.targetType, targetId, info.totalCents, db);
+    }
+
     await db.auditLog.create({
       data: {
         companyId,
@@ -367,18 +513,6 @@ export async function undo(
       },
     });
   });
-
-  // Reverte flags dos alvos que ficaram sem reconciliação.
-  const seen = new Set<string>();
-  for (const r of tx.reconciliations) {
-    const field = FK_BY_TYPE[r.targetType];
-    if (!field || field === 'pairTransactionId') continue;
-    const targetId = r[field];
-    if (!targetId || seen.has(`${r.targetType}:${targetId}`)) continue;
-    seen.add(`${r.targetType}:${targetId}`);
-    const total = await resolveTarget(companyId, { targetType: r.targetType, targetId, amount: 1 });
-    if (total) await syncTargetFlag(companyId, r.targetType, targetId, total.totalCents);
-  }
 
   const updated = await reload(companyId, id);
   return { status: updated.status };
@@ -403,12 +537,16 @@ export async function buildSuggestions(
 
   let suggestions: Suggestion[] = [];
   if (tx.inferredMethod === 'CARD_SETTLEMENT') {
+    // §7.6.3: depósito de cartão só fecha com recebíveis — nunca com
+    // Payment/OtherIncome/CashMovement que aparecem na lista genérica.
+    const cardCands = cands.filter((c) => c.targetType === 'CARD_RECEIVABLE');
     const absolute = Math.abs(toCents(tx.amount));
     const tol = cardToleranceCents(absolute, cfg.cardTolerancePct);
-    const exact = findSubset(cands.map((c) => ({ id: c.id, cents: c.remainingCents })), absolute, 0);
-    const ids = exact ?? findSubset(cands.map((c) => ({ id: c.id, cents: c.remainingCents })), absolute, tol);
+    const pool = cardCands.map((c) => ({ id: c.id, cents: c.remainingCents }));
+    const exact = findSubset(pool, absolute, 0);
+    const ids = exact ?? findSubset(pool, absolute, tol);
     suggestions = (ids ?? []).map((cid) => {
-      const c = cands.find((x) => x.id === cid)!;
+      const c = cardCands.find((x) => x.id === cid)!;
       return { targetType: c.targetType, targetId: c.targetId, amount: toApi(fromCents(c.remainingCents)), score: 100 };
     });
   } else {
@@ -437,7 +575,19 @@ export async function buildSuggestions(
       }));
   }
 
-  if (suggestions.length > 0 && suggestions[0].score >= 50 && tx.status === 'PENDING') {
+  // GET é read-only (revisão 98291b5): calcular não pode mudar status.
+  // A persistência de SUGGESTED acontece só no POST com finance.reconcile.
+  return suggestions;
+}
+
+/** POST /:id/suggestions — registra SUGGESTED quando o topo passa de 50. */
+export async function markSuggested(
+  companyId: string,
+  id: string,
+  cfg: MatchConfig = DEFAULT_MATCH_CONFIG
+) {
+  const suggestions = await buildSuggestions(companyId, id, cfg);
+  if (suggestions.length > 0 && suggestions[0].score >= 50) {
     await prisma.bankTransaction.updateMany({
       where: { id, companyId, status: 'PENDING' },
       data: { status: 'SUGGESTED' },
@@ -462,13 +612,18 @@ export async function bulkConfirm(
       }
       const top = suggestions[0].score;
       const second = suggestions[1]?.score ?? -1;
+      // Subset de cartão é UMA sugestão atômica (vários recebíveis, score 100):
+      // não pode ser tratado como "ambiguidade" nem ser cortado no topo.
+      const cardAtomic =
+        suggestions.length > 1 && suggestions.every((s) => s.targetType === 'CARD_RECEIVABLE');
       // autoConfirm desligado por padrão: exige topo isolado ou folga >= 15.
-      if (second >= 0 && top - second < 15) {
+      if (!cardAtomic && second >= 0 && top - second < 15) {
         results.push({ id, reconciled: false, reason: 'SUGESTAO_AMBIGUA' });
         continue;
       }
+      const chosen = cardAtomic ? suggestions : [suggestions[0]];
       await reconcile(companyId, userId, id, {
-        targets: suggestions.map((s) => ({
+        targets: chosen.map((s) => ({
           targetType: s.targetType,
           targetId: s.targetId,
           amount: s.amount,
@@ -509,9 +664,19 @@ export async function createEntry(
     select: { id: true, kind: true },
   });
   if (!category) throw new AppError('Categoria não encontrada', 404, 'CATEGORY_NOT_FOUND');
+  if (input.supplierId) {
+    const supplier = await prisma.supplier.findFirst({
+      where: { id: input.supplierId, companyId },
+      select: { id: true },
+    });
+    if (!supplier) throw new AppError('Fornecedor não encontrado', 404, 'SUPPLIER_NOT_FOUND');
+  }
 
-  const cents = Math.abs(toCents(tx.amount));
-  if (cents === 0) throw new AppError('Valor da transação é zero', 422, 'BANK_TRANSACTION_ZERO');
+  // I3/I4: em transação PARTIAL o lançamento cobre só o saldo livre.
+  const absolute = Math.abs(toCents(tx.amount));
+  const already = tx.reconciliations.reduce((a, r) => a + toCents(r.amount), 0);
+  const cents = absolute - already;
+  if (cents <= 0) throw new AppError('Valor da transação é zero', 422, 'BANK_TRANSACTION_ZERO');
 
   const isIn = toCents(tx.amount) > 0;
   const expectedKind = isIn ? 'INCOME' : 'EXPENSE';
@@ -526,12 +691,24 @@ export async function createEntry(
   let entry: { id: string; source: string };
   let targetType: ReconTargetType;
   await prisma.$transaction(async (db) => {
+    // Reivindica o slot ANTES de criar o lançamento e recalcula o saldo livre
+    // sob o lock: duas chamadas concorrentes não podem gerar 2× a soma (revisão 2).
+    await claimReconciliationSlot(db, companyId, id, already);
+    const rows = await db.reconciliation.findMany({
+      where: { companyId, bankTransactionId: id },
+      select: { amount: true },
+    });
+    const settled = rows.reduce((a, r) => a + toCents(r.amount), 0);
+    const liveCents = absolute - settled;
+    if (liveCents <= 0) {
+      throw new AppError('A transação foi alterada por outra operação', 409, 'RECONCILE_CONFLICT');
+    }
     if (isIn) {
       const created = await db.otherIncome.create({
         data: {
           companyId,
           description: input.description,
-          amount: fromCents(cents),
+          amount: fromCents(liveCents),
           receivedAt: tx.postedAt,
           categoryId: input.categoryId,
           bankAccountId: tx.bankAccountId,
@@ -550,8 +727,8 @@ export async function createEntry(
           category: 'BANK_RECONCILIATION',
           categoryId: input.categoryId,
           supplierId: input.supplierId ?? null,
-          amount: cents / 100,
-          paidAmount: fromCents(cents),
+          amount: liveCents / 100,
+          paidAmount: fromCents(liveCents),
           dueDate: tx.postedAt,
           paidDate: tx.postedAt,
           isPaid: true,
@@ -573,14 +750,18 @@ export async function createEntry(
         bankTransactionId: id,
         targetType,
         [field]: entry.id,
-        amount: fromCents(cents),
+        amount: fromCents(liveCents),
         origin: 'MANUAL',
         createdById: userId,
       } as Prisma.ReconciliationUncheckedCreateInput,
     });
+    const sum = settled + liveCents;
     await db.bankTransaction.update({
       where: { id },
-      data: { reconciledAmount: fromCents(cents), status: 'RECONCILED' },
+      data: {
+        reconciledAmount: fromCents(sum),
+        status: statusFor(absolute, sum, tx.status),
+      },
     });
     await db.auditLog.create({
       data: {

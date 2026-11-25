@@ -6,6 +6,7 @@ import {
   buildSuggestions,
   bulkConfirm,
   createEntry,
+  markSuggested,
   reconcile,
   summary,
   undo,
@@ -60,7 +61,10 @@ export const patch = asyncHandler(async (req: Request, res: Response) => {
 
 /** [F2.5] Rotas de reconciliação — spec §7.6.5. companyId sempre de req.user. */
 export const reconcileTx = asyncHandler(async (req: Request, res: Response) => {
-  const result = await reconcile(req.user!.companyId, req.user!.id, req.params.id, req.body);
+  // `origin` é decisão do servidor (MANUAL aqui, AUTO só no bulk interno).
+  const result = await reconcile(req.user!.companyId, req.user!.id, req.params.id, {
+    targets: req.body.targets,
+  });
   // reload() do engine devolve Decimal cru; a API devolve number via serializeTx.
   const transaction = await bankTransactionsService.getById(req.user!.companyId, req.params.id);
   res.json({ status: 'success', data: { ...result, transaction } });
@@ -84,6 +88,12 @@ export const createEntryFromTx = asyncHandler(async (req: Request, res: Response
 
 export const getSuggestions = asyncHandler(async (req: Request, res: Response) => {
   const suggestions = await buildSuggestions(req.user!.companyId, req.params.id);
+  res.json({ status: 'success', data: { suggestions } });
+});
+
+/** Escrita explícita de SUGGESTED — exige finance.reconcile. */
+export const persistSuggestions = asyncHandler(async (req: Request, res: Response) => {
+  const suggestions = await markSuggested(req.user!.companyId, req.params.id);
   res.json({ status: 'success', data: { suggestions } });
 });
 

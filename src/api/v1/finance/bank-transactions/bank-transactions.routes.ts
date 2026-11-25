@@ -56,6 +56,12 @@ router.get(
   controller.getSuggestions
 );
 router.post(
+  '/:id/suggestions',
+  checkPermission('finance.reconcile'),
+  validateZod(suggestionsSchema),
+  controller.persistSuggestions
+);
+router.post(
   '/:id/reconcile',
   checkPermission('finance.reconcile'),
   validateZod(reconcileBankTransactionSchema),

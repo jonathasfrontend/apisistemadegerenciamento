@@ -31,6 +31,7 @@ describe('finance reconciliation (F2.5)', () => {
   let acquirerId: string;
   let clientAna: string;
   let tokenNoPerm: string;
+  let tokenView: string;
 
   const createAccount = async (companyId: string, name: string) =>
     (
@@ -194,6 +195,32 @@ describe('finance reconciliation (F2.5)', () => {
       .post('/api/v1/auth/login')
       .send({ email: userNoPerm.email, password: 'teste123' });
     tokenNoPerm = login.body.data.accessToken;
+
+    // Leitor puro: só finance.bank.view, sem finance.reconcile.
+    const permView = await prisma.permission.findUniqueOrThrow({
+      where: { name: 'finance.bank.view' },
+    });
+    const roleView = await prisma.role.create({
+      data: {
+        name: `View-${f.suffix}`,
+        isSystem: false,
+        isActive: true,
+        rolePermissions: { create: [{ permissionId: permView.id }] },
+      },
+    });
+    const userView = await prisma.user.create({
+      data: {
+        email: `view-${f.suffix}@test.local`,
+        passwordHash: await bcrypt.hash('teste123', 4),
+        name: 'Somente Leitura',
+        roleId: roleView.id,
+        companyId: f.companyAId,
+      },
+    });
+    const loginView = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: userView.email, password: 'teste123' });
+    tokenView = loginView.body.data.accessToken;
   });
 
   it('reconcilia 1:1 e marca o alvo (I3/I4/I5)', async () => {
@@ -450,5 +477,192 @@ describe('finance reconciliation (F2.5)', () => {
       expect(targetSum).toBeLessThanOrEqual(toCents(payment.amount)); // I5
       expect(payment.isReconciled).toBe(sum === absolute);
     }
+  });
+
+  // ---- Reprodutores dos achados da revisão independente de 98291b5 ----
+
+  it('rejeita alvo duplicado no mesmo request (I5)', async () => {
+    const tx = await seedTx({ cents: 10000 });
+    const payment = await seedPayment({ cents: 10000 });
+    const res = await reconcile(tx.id, [
+      { targetType: 'PAYMENT', targetId: payment.id, amount: 50 },
+      { targetType: 'PAYMENT', targetId: payment.id, amount: 50 },
+    ]);
+    expect([400, 422]).toContain(res.status);
+    expect(await prisma.reconciliation.count({ where: { bankTransactionId: tx.id } })).toBe(0);
+  });
+
+  it('create-entry em transação PARTIAL concilia apenas o restante (I3/I4)', async () => {
+    const tx = await seedTx({ cents: -10000, method: 'FEE', description: 'Tarifa parcial' });
+    const partial = await seedExpense({ cents: 4000, description: 'Tarifa parcial já lançada' });
+    await reconcile(tx.id, [{ targetType: 'EXPENSE', targetId: partial.id, amount: 40 }]);
+
+    const res = await request(app)
+      .post(`${BT}/${tx.id}/create-entry`)
+      .set('Authorization', `Bearer ${f.tokenA}`)
+      .send({ description: 'Tarifa parcial', categoryId: expenseCategory });
+    expect(res.status).toBe(201);
+
+    const expense = await prisma.expense.findUniqueOrThrow({ where: { id: res.body.data.entry.id } });
+    expect(toCents(expense.paidAmount!)).toBe(6000);
+    const saved = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: tx.id } });
+    expect(toCents(saved.reconciledAmount)).toBe(10000);
+    expect(saved.status).toBe('RECONCILED');
+  });
+
+  it('rejeita supplierId de outra empresa no create-entry', async () => {
+    const supplierB = await prisma.supplier.create({
+      data: { companyId: f.companyBId, name: `Fornecedor B ${f.suffix}` },
+    });
+    const tx = await seedTx({ cents: -1000, method: 'FEE' });
+    const res = await request(app)
+      .post(`${BT}/${tx.id}/create-entry`)
+      .set('Authorization', `Bearer ${f.tokenA}`)
+      .send({ description: 'Tarifa com fornecedor estrangeiro', categoryId: expenseCategory, supplierId: supplierB.id });
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('SUPPLIER_NOT_FOUND');
+  });
+
+  it('rejeita transferência manual com mesmo sinal ou a mesma transação', async () => {
+    const sameSign = await seedTx({ cents: 5000, bankAccountId: accountA, method: 'TED' });
+    const pairSame = await seedTx({ cents: 5000, bankAccountId: accountA, method: 'TED' });
+    const same = await reconcile(sameSign.id, [
+      { targetType: 'TRANSFER', targetId: pairSame.id, amount: 50 },
+    ]);
+    expect(same.status).toBe(422);
+    expect(same.body.code).toBe('RECONCILE_TRANSFER_INVALID');
+
+    const self = await seedTx({ cents: 6000, bankAccountId: accountA, method: 'TED' });
+    const selfRes = await reconcile(self.id, [{ targetType: 'TRANSFER', targetId: self.id, amount: 60 }]);
+    expect(selfRes.status).toBe(422);
+  });
+
+  it('sugestão de cartão usa só recebíveis da adquirente identificada', async () => {
+    const tx = await seedTx({ cents: 7000, method: 'CARD_SETTLEMENT', description: 'Repasse ADQ Vendas' });
+    const payment = await seedPayment({ cents: 7000, method: 'CREDIT' });
+    const receivable = await seedReceivable({ paymentId: payment.id, cents: 7000 });
+    // Mesmo valor/dia, mas de outra adquirente e de outro método: não podem entrar no subset.
+    await seedPayment({ cents: 7000, method: 'PIX' });
+    const otherAcquirer = await prisma.acquirer.create({
+      data: { companyId: f.companyAId, name: `Outra ${f.suffix}`, bankKeywords: ['OUTRA'] },
+    });
+    const otherPayment = await seedPayment({ cents: 7000, method: 'CREDIT' });
+    await prisma.cardReceivable.create({
+      data: {
+        companyId: f.companyAId,
+        paymentId: otherPayment.id,
+        acquirerId: otherAcquirer.id,
+        installmentNumber: 1,
+        installmentTotal: 1,
+        grossAmount: fromCents(7000),
+        feeAmount: fromCents(0),
+        netAmount: fromCents(7000),
+        expectedDate: at('2026-11-18'),
+      },
+    });
+
+    const res = await request(app)
+      .get(`${BT}/${tx.id}/suggestions`)
+      .set('Authorization', `Bearer ${f.tokenA}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.suggestions).toHaveLength(1);
+    expect(res.body.data.suggestions[0]).toMatchObject({
+      targetType: 'CARD_RECEIVABLE',
+      targetId: receivable.id,
+    });
+  });
+
+  it('perna da transferência tem reconciliação espelho e undo limpa as duas pontas', async () => {
+    const out = await seedTx({ cents: -30000, bankAccountId: accountA, method: 'TED' });
+    const incoming = await seedTx({ cents: 30000, bankAccountId: accountA2, method: 'TED' });
+    await reconcile(out.id, [{ targetType: 'TRANSFER', targetId: incoming.id, amount: 300 }]);
+
+    expect(await prisma.reconciliation.count({ where: { bankTransactionId: incoming.id } })).toBe(1);
+    const before = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: incoming.id } });
+    expect(toCents(before.reconciledAmount)).toBe(30000);
+    expect(before.status).toBe('RECONCILED');
+
+    const undone = await request(app)
+      .delete(`${BT}/${out.id}/reconcile`)
+      .set('Authorization', `Bearer ${f.tokenA}`)
+      .send({});
+    expect(undone.status).toBe(200);
+    const after = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: incoming.id } });
+    expect(after.status).toBe('PENDING');
+    expect(toCents(after.reconciledAmount)).toBe(0);
+    expect(await prisma.reconciliation.count({ where: { bankTransactionId: incoming.id } })).toBe(0);
+  });
+
+  it('GET de sugestões é read-only; POST com finance.reconcile registra SUGGESTED', async () => {
+    const tx = await seedTx({ cents: 11000, description: 'Pix Recebido Ana Silva' });
+    await seedPayment({ cents: 11000, method: 'PIX' });
+
+    const read = await request(app)
+      .get(`${BT}/${tx.id}/suggestions`)
+      .set('Authorization', `Bearer ${tokenView}`);
+    expect(read.status).toBe(200);
+    expect((await prisma.bankTransaction.findUniqueOrThrow({ where: { id: tx.id } })).status).toBe('PENDING');
+
+    const forbidden = await request(app)
+      .post(`${BT}/${tx.id}/suggestions`)
+      .set('Authorization', `Bearer ${tokenView}`)
+      .send({});
+    expect(forbidden.status).toBe(403);
+
+    const write = await request(app)
+      .post(`${BT}/${tx.id}/suggestions`)
+      .set('Authorization', `Bearer ${f.tokenA}`)
+      .send({});
+    expect(write.status).toBe(200);
+    expect((await prisma.bankTransaction.findUniqueOrThrow({ where: { id: tx.id } })).status).toBe('SUGGESTED');
+  });
+
+  it('bulk-confirm trata o subset de cartão como uma única sugestão atômica', async () => {
+    const tx = await seedTx({ cents: 8000, method: 'CARD_SETTLEMENT', description: 'Repasse ADQ Vendas' });
+    const payment = await seedPayment({ cents: 8000, method: 'CREDIT' });
+    await seedReceivable({ paymentId: payment.id, cents: 5000, n: 1 });
+    await seedReceivable({ paymentId: payment.id, cents: 3000, n: 2 });
+
+    const res = await request(app)
+      .post(`${BT}/bulk-confirm`)
+      .set('Authorization', `Bearer ${f.tokenA}`)
+      .send({ ids: [tx.id] });
+    expect(res.status).toBe(200);
+    expect(res.body.data.results[0].reconciled).toBe(true);
+    const receivables = await prisma.cardReceivable.findMany({ where: { paymentId: payment.id } });
+    expect(receivables.every((r) => r.isReconciled)).toBe(true);
+  });
+
+  it('ignora origin enviado pelo cliente e registra MANUAL no AuditLog', async () => {
+    const tx = await seedTx({ cents: 13000, description: 'Pix Recebido Ana Silva' });
+    const payment = await seedPayment({ cents: 13000, method: 'PIX' });
+    const res = await reconcile(tx.id, [
+      { targetType: 'PAYMENT', targetId: payment.id, amount: 130 },
+    ], f.tokenA, { origin: 'AUTO' });
+    expect(res.status).toBe(200);
+
+    const log = await prisma.auditLog.findFirst({
+      where: { entityId: tx.id, action: 'RECONCILE' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(log).not.toBeNull();
+    expect((log!.payload as { origin: string }).origin).toBe('MANUAL');
+  });
+
+  it('não sugere recebível quando nenhuma adquirente casa com o extrato', async () => {
+    const payment = await seedPayment({ cents: 10000, method: 'CREDIT' });
+    await seedReceivable({ paymentId: payment.id, cents: 10000 });
+    const tx = await seedTx({
+      cents: 10000,
+      method: 'CARD_SETTLEMENT',
+      description: `Liquidacao Generica ${f.suffix}`,
+    });
+
+    const res = await request(app)
+      .get(`${BT}/${tx.id}/suggestions`)
+      .set('Authorization', `Bearer ${f.tokenA}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.suggestions).toEqual([]);
   });
 });
