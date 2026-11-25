@@ -6,9 +6,11 @@ import { AppError } from '../../../../middlewares/error.handler';
 import { validateZod } from '../../../../middlewares/validate';
 import * as controller from './imports.controller';
 import {
+  confirmImportSchema,
   importIdSchema,
   listImportRowsSchema,
   listImportsSchema,
+  patchImportRowSchema,
   uploadImportSchema,
 } from './imports.schemas';
 
@@ -66,6 +68,28 @@ router.get(
   checkPermission('finance.bank.import'),
   validateZod(importIdSchema),
   controller.getById
+);
+
+// [F2.3] revisão, confirmação e descarte. Rotas específicas antes de `/:id`
+// apenas por clareza — Express distingue por método, mas a ordem evita
+// surpresa se uma rota genérica PATCH/DELETE for adicionada depois.
+router.patch(
+  '/:id/rows/:rowId',
+  checkPermission('finance.bank.import'),
+  validateZod(patchImportRowSchema),
+  controller.updateRow
+);
+router.post(
+  '/:id/confirm',
+  checkPermission('finance.bank.import'),
+  validateZod(confirmImportSchema),
+  controller.confirm
+);
+router.delete(
+  '/:id',
+  checkPermission('finance.bank.import'),
+  validateZod(importIdSchema),
+  controller.discard
 );
 
 export default router;

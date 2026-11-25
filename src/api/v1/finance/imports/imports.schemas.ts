@@ -57,3 +57,34 @@ export const listImportRowsSchema = z.object({
     id: z.string().trim().min(1, 'Id do lote é obrigatório').max(60),
   }),
 });
+
+/** [F2.3] Edição de linha em staging (spec §7.2). */
+export const patchImportRowSchema = z.object({
+  body: z
+    .object({
+      description: z.string().trim().min(1, 'Descrição não pode ser vazia').max(500).optional(),
+      amount: z.number().finite().optional(),
+      postedAt: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato AAAA-MM-DD')
+        .optional(),
+      isIgnored: z.boolean().optional(),
+    })
+    .refine((body) => Object.keys(body).length > 0, {
+      message: 'Informe ao menos um campo para editar',
+    }),
+  params: z.object({
+    id: z.string().trim().min(1, 'Id do lote é obrigatório').max(60),
+    rowId: z.string().trim().min(1, 'Id da linha é obrigatório').max(60),
+  }),
+});
+
+/** [F2.3] Confirmação do lote — ack obrigatório quando o saldo diverge. */
+export const confirmImportSchema = z.object({
+  body: z.object({
+    acknowledgeMismatch: z.boolean().optional(),
+  }),
+  params: z.object({
+    id: z.string().trim().min(1, 'Id do lote é obrigatório').max(60),
+  }),
+});

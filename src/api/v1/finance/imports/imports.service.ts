@@ -16,7 +16,11 @@ import { Prisma } from '@prisma/client';
 import prisma from '../../../../config/db';
 import { env } from '../../../../config/env';
 import { AppError } from '../../../../middlewares/error.handler';
-import { toApi } from '../../../../domain/finance/money';
+import { logger } from '../../../../utils/logger';
+import { runSerializable } from '../../../../utils/transaction';
+import { fromCents, toApi, toCents } from '../../../../domain/finance/money';
+import { computeDedupeKeys } from '../../../../domain/finance/dedupe';
+import { normalizeDescription } from '../../../../domain/finance/text';
 import { encryptBuffer, parseFileKey } from '../../../../domain/finance/storage/crypto';
 import {
   createFinanceStorage,
@@ -327,6 +331,229 @@ export class ImportsService {
       items: items.map(serializeRow),
       pagination: buildPagination(params.page, params.limit, total),
     };
+  }
+
+  /**
+   * [F2.3] Edita uma linha em staging. `companyId` vem do `req.user`; o lote é
+   * sempre filtrado pela empresa antes de tocar na linha (isolamento).
+   *
+   * Regeneração do dedupeKey (spec §7.2):
+   *  - `F:<FITID>`: FITID é confiável, mas valor/data são parte do hash — mudar
+   *    qualquer um dos dois força `H:` (externalId é descartado na regeneração).
+   *    Só descrição não altera a chave.
+   *  - `H:<sha256>`: a descrição normalizada entra no hash, então qualquer uma
+   *    das três mudanças recalcula a chave.
+   */
+  async updateRow(
+    companyId: string,
+    batchId: string,
+    rowId: string,
+    input: {
+      description?: string;
+      amount?: number;
+      postedAt?: string;
+      isIgnored?: boolean;
+    }
+  ) {
+    const batch = await prisma.importBatch.findFirst({
+      where: { id: batchId, companyId },
+      select: { id: true, status: true },
+    });
+    if (!batch) throw new AppError('Lote de importação não encontrado', 404);
+    if (['CONFIRMED', 'DISCARDED', 'FAILED'].includes(batch.status)) {
+      throw new AppError('Lote não pode ser editado no status atual', 409, 'IMPORT_BATCH_NOT_EDITABLE');
+    }
+
+    const row = await prisma.importRow.findFirst({ where: { id: rowId, batchId: batch.id } });
+    if (!row) throw new AppError('Linha de importação não encontrada', 404, 'IMPORT_ROW_NOT_FOUND');
+
+    const postedAt = input.postedAt
+      ? new Date(`${input.postedAt}T00:00:00.000Z`)
+      : row.postedAt;
+    const amountCents = input.amount !== undefined ? toCents(input.amount) : toCents(row.amount);
+    const description = input.description ?? row.description;
+    const isIgnored = input.isIgnored ?? row.isIgnored;
+
+    const valueChanged = input.amount !== undefined || input.postedAt !== undefined;
+    let dedupeKey = row.dedupeKey;
+    if (valueChanged || dedupeKey.startsWith('H:')) {
+      dedupeKey = computeDedupeKeys([
+        {
+          postedAt: postedAt.toISOString().slice(0, 10),
+          cents: amountCents,
+          description,
+          externalId: null, // valor/data mudaram ⇒ FITID não é mais confiável
+        },
+      ])[0];
+    }
+
+    const updated = await prisma.importRow.update({
+      where: { id: row.id },
+      data: {
+        postedAt,
+        amount: fromCents(amountCents),
+        description,
+        normalizedDescription: normalizeDescription(description),
+        dedupeKey,
+        isIgnored,
+      },
+    });
+    return serializeRow(updated);
+  }
+
+  /**
+   * [F2.3] Confirma o lote em UMA transação SERIALIZABLE: cria as transações
+   * bancárias, atualiza contadores/status e `BankAccount.lastImportAt`.
+   * `createMany({ skipDuplicates })` cobre a janela entre o staging e a
+   * confirmação (outro lote pode ter gravado o mesmo dedupeKey nesse meio).
+   */
+  async confirm(
+    companyId: string,
+    userId: string,
+    batchId: string,
+    acknowledgeMismatch = false
+  ) {
+    const batch = await prisma.importBatch.findFirst({ where: { id: batchId, companyId } });
+    if (!batch) throw new AppError('Lote de importação não encontrado', 404);
+    if (batch.status === 'CONFIRMED') {
+      throw new AppError('Lote já foi confirmado', 409, 'IMPORT_ALREADY_CONFIRMED');
+    }
+    if (!['READY', 'NEEDS_REVIEW'].includes(batch.status)) {
+      throw new AppError('Lote não pode ser confirmado no status atual', 409, 'IMPORT_INVALID_STATUS');
+    }
+    if (batch.balanceCheck === 'MISMATCH' && acknowledgeMismatch !== true) {
+      throw new AppError(
+        'Saldo divergente: confirme com acknowledgeMismatch',
+        422,
+        'BALANCE_MISMATCH_ACK_REQUIRED'
+      );
+    }
+
+    const result = await runSerializable(prisma, async (tx) => {
+      const current = await tx.importBatch.findFirst({ where: { id: batchId, companyId } });
+      if (
+        !current ||
+        current.status === 'CONFIRMED' ||
+        !['READY', 'NEEDS_REVIEW'].includes(current.status)
+      ) {
+        throw new AppError('Lote não pode ser confirmado no status atual', 409, 'IMPORT_INVALID_STATUS');
+      }
+
+      const rows = await tx.importRow.findMany({
+        where: { batchId, isDuplicate: false, isIgnored: false },
+        orderBy: { rowIndex: 'asc' },
+      });
+
+      if (rows.length > 0 && !current.bankAccountId) {
+        throw new AppError(
+          'Lote sem conta bancária não pode ser confirmado',
+          422,
+          'IMPORT_BANK_ACCOUNT_REQUIRED'
+        );
+      }
+
+      const keys = rows.map((row) => row.dedupeKey);
+      const existing = keys.length
+        ? await tx.bankTransaction.findMany({
+            where: { bankAccountId: current.bankAccountId ?? undefined, dedupeKey: { in: keys } },
+            select: { dedupeKey: true },
+          })
+        : [];
+      const existingKeys = new Set(existing.map((item) => item.dedupeKey));
+      const toCreate = rows.filter((row) => !existingKeys.has(row.dedupeKey));
+
+      if (toCreate.length > 0) {
+        await tx.bankTransaction.createMany({
+          data: toCreate.map((row) => ({
+            companyId,
+            bankAccountId: current.bankAccountId as string,
+            importBatchId: current.id,
+            source: 'OFX' as const,
+            dedupeKey: row.dedupeKey,
+            externalId: row.externalId,
+            postedAt: row.postedAt,
+            amount: row.amount,
+            description: row.description,
+            normalizedDescription: row.normalizedDescription,
+            memo: row.memo,
+            inferredMethod: row.inferredMethod,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      const totalRows = await tx.importRow.count({ where: { batchId } });
+      const now = new Date();
+      const confirmed = await tx.importBatch.update({
+        where: { id: current.id },
+        data: {
+          status: 'CONFIRMED',
+          confirmedAt: now,
+          confirmedById: userId,
+          newRows: toCreate.length,
+          duplicateRows: Math.max(0, totalRows - toCreate.length),
+        },
+      });
+
+      if (current.bankAccountId) {
+        await tx.bankAccount.update({
+          where: { id: current.bankAccountId },
+          data: { lastImportAt: now },
+        });
+      }
+
+      return { batch: confirmed, created: toCreate.length };
+    });
+
+    // Nota: o enfileiramento de `finance-matching` fica na Task 6 [F2.5],
+    // quando o motor de conciliação existir. Enfileirar um job sem worker
+    // deixaria jobs órfãos no Redis (divergência registrada no AUDIT §32).
+    return { batch: serializeBatch(result.batch), created: result.created };
+  }
+
+  /**
+   * [F2.3] Descarta o lote. Arquivo cifrado é apagado do storage; lote
+   * CONFIRMADO com conciliação não pode ser desfeito (409).
+   */
+  async discard(companyId: string, batchId: string) {
+    const batch = await prisma.importBatch.findFirst({ where: { id: batchId, companyId } });
+    if (!batch) throw new AppError('Lote de importação não encontrado', 404);
+
+    if (batch.status === 'CONFIRMED') {
+      const linked = await prisma.reconciliation.count({
+        where: { companyId, bankTransaction: { is: { importBatchId: batchId } } },
+      });
+      if (linked > 0) {
+        throw new AppError(
+          'Lote possui conciliações e não pode ser descartado',
+          409,
+          'IMPORT_HAS_RECONCILIATIONS'
+        );
+      }
+    }
+
+    await runSerializable(prisma, async (tx) => {
+      if (batch.status === 'CONFIRMED') {
+        // Sem conciliação: desfazer também remove as transações geradas.
+        await tx.bankTransaction.deleteMany({ where: { companyId, importBatchId: batchId } });
+      }
+      await tx.importBatch.update({
+        where: { id: batchId },
+        data: { status: 'DISCARDED', storageKey: null },
+      });
+    });
+
+    if (batch.storageKey) {
+      try {
+        const storage = createFinanceStorage();
+        await storage.delete(batch.storageKey);
+      } catch (error: any) {
+        // Storage sem chave não pode impedir o descarte do registro no banco.
+        logger.warn(`Falha ao apagar arquivo do lote ${batchId}: ${error?.message}`);
+      }
+    }
+
+    return { id: batchId, status: 'DISCARDED' as const };
   }
 }
 

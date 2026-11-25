@@ -75,3 +75,34 @@ export const rows = asyncHandler(async (req: Request, res: Response) => {
   });
   res.json({ status: 'success', data: items, pagination });
 });
+
+/** [F2.3] Edição de linha em staging. */
+export const updateRow = asyncHandler(async (req: Request, res: Response) => {
+  const data = await importsService.updateRow(
+    req.user!.companyId,
+    req.params.id,
+    req.params.rowId,
+    req.body
+  );
+  res.json({ status: 'success', data });
+});
+
+/** [F2.3] Confirmação do lote (cria BankTransaction). */
+export const confirm = asyncHandler(async (req: Request, res: Response) => {
+  const result = await importsService.confirm(
+    req.user!.companyId,
+    req.user!.id,
+    req.params.id,
+    req.body?.acknowledgeMismatch === true
+  );
+  // Contrato igual ao de `GET /imports/:id`: o lote em `data`, com o total de
+  // transações criadas junto (não num sub-objeto), para o front atualizar a
+  // linha da tabela sem um segundo request.
+  res.json({ status: 'success', data: { ...result.batch, created: result.created } });
+});
+
+/** [F2.3] Descarte do lote. */
+export const discard = asyncHandler(async (req: Request, res: Response) => {
+  const data = await importsService.discard(req.user!.companyId, req.params.id);
+  res.json({ status: 'success', data });
+});
