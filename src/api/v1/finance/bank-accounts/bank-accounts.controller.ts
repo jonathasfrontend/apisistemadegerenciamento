@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../../../middlewares/error.handler';
+import { toApi } from '../../../../domain/finance/money';
 import { parseListParams } from '../shared';
 import { bankAccountsService } from './bank-accounts.service';
 
@@ -37,5 +38,14 @@ export const balance = asyncHandler(async (req: Request, res: Response) => {
     req.params.id,
     req.query.asOf as string | undefined
   );
-  res.json({ status: 'success', data });
+  res.json({
+    status: 'success',
+    data: {
+      ...data,
+      balance: toApi(data.balance),
+      initialBalance: toApi(data.initialBalance),
+      totalIn: toApi(data.totalIn),
+      totalOut: toApi(data.totalOut),
+    },
+  });
 });

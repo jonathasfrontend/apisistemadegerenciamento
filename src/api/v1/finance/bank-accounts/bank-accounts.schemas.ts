@@ -60,6 +60,15 @@ export const balanceSchema = z.object({
   body: z.object({}).optional(),
   params: z.object({ id: z.string().min(1) }),
   query: z.object({
-    asOf: z.string().optional(),
+    // [F2.4] Corte I10: só date-only válido. `Date.parse('123')` e
+    // `Date.parse('2026/11/10')` passariam e mudariam o recorte sem aviso.
+    asOf: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'asOf deve ser YYYY-MM-DD')
+      .refine((value) => {
+        const parsed = new Date(`${value}T00:00:00.000Z`);
+        return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+      }, 'asOf inválido')
+      .optional(),
   }),
 });
