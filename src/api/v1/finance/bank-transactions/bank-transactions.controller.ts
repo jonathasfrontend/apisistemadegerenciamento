@@ -2,6 +2,14 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../../../middlewares/error.handler';
 import { parsePage } from '../../../../utils/pagination';
 import { bankTransactionsService } from './bank-transactions.service';
+import {
+  buildSuggestions,
+  bulkConfirm,
+  createEntry,
+  reconcile,
+  summary,
+  undo,
+} from '../../../../domain/finance/reconciliation/engine';
 
 /**
  * [F2.4] Teto 200 é requisito do extrato (plano Task 5), diferente do
@@ -47,5 +55,44 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 
 export const patch = asyncHandler(async (req: Request, res: Response) => {
   const data = await bankTransactionsService.patch(req.user!.companyId, req.params.id, req.body);
+  res.json({ status: 'success', data });
+});
+
+/** [F2.5] Rotas de reconciliação — spec §7.6.5. companyId sempre de req.user. */
+export const reconcileTx = asyncHandler(async (req: Request, res: Response) => {
+  const result = await reconcile(req.user!.companyId, req.user!.id, req.params.id, req.body);
+  // reload() do engine devolve Decimal cru; a API devolve number via serializeTx.
+  const transaction = await bankTransactionsService.getById(req.user!.companyId, req.params.id);
+  res.json({ status: 'success', data: { ...result, transaction } });
+});
+
+export const undoReconcile = asyncHandler(async (req: Request, res: Response) => {
+  const data = await undo(
+    req.user!.companyId,
+    req.user!.id,
+    req.params.id,
+    req.body?.deleteCreatedEntries === true
+  );
+  res.json({ status: 'success', data });
+});
+
+export const createEntryFromTx = asyncHandler(async (req: Request, res: Response) => {
+  const result = await createEntry(req.user!.companyId, req.user!.id, req.params.id, req.body);
+  const transaction = await bankTransactionsService.getById(req.user!.companyId, req.params.id);
+  res.status(201).json({ status: 'success', data: { ...result, transaction } });
+});
+
+export const getSuggestions = asyncHandler(async (req: Request, res: Response) => {
+  const suggestions = await buildSuggestions(req.user!.companyId, req.params.id);
+  res.json({ status: 'success', data: { suggestions } });
+});
+
+export const bulkConfirmSuggestions = asyncHandler(async (req: Request, res: Response) => {
+  const data = await bulkConfirm(req.user!.companyId, req.user!.id, req.body.ids);
+  res.json({ status: 'success', data });
+});
+
+export const reconciliationSummary = asyncHandler(async (req: Request, res: Response) => {
+  const data = await summary(req.user!.companyId);
   res.json({ status: 'success', data });
 });

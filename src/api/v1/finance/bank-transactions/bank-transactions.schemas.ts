@@ -75,3 +75,67 @@ export const patchBankTransactionSchema = z.object({
     }),
   params: z.object({ id: z.string().trim().min(1).max(60) }),
 });
+
+/** [F2.5] Reconciliação — spec §7.6.5. `amount` é em reais, positivo, ≤ 2 casas. */
+const reconcileAmount = z
+  .number()
+  .finite()
+  .positive('Valor do alvo deve ser positivo')
+  .refine((v) => D(v).decimalPlaces() <= 2, 'Valor deve ter no máximo 2 casas decimais')
+  .refine((v) => D(v).lte('999999999999.99'), 'Valor acima do permitido');
+
+const targetTypes = [
+  'PAYMENT',
+  'CARD_RECEIVABLE',
+  'EXPENSE',
+  'OTHER_INCOME',
+  'CASH_MOVEMENT',
+  'TRANSFER',
+] as const;
+
+export const reconcileBankTransactionSchema = z.object({
+  body: z.object({
+    targets: z
+      .array(
+        z.object({
+          targetType: z.enum(targetTypes),
+          targetId: z.string().trim().min(1).max(60),
+          amount: reconcileAmount,
+        })
+      )
+      .min(1, 'Informe ao menos um alvo')
+      .max(50, 'Máximo de 50 alvos por reconciliação'),
+    origin: z.enum(['AUTO', 'RULE', 'MANUAL']).optional(),
+  }),
+  params: z.object({ id: z.string().trim().min(1).max(60) }),
+});
+
+export const undoReconciliationSchema = z.object({
+  body: z.object({ deleteCreatedEntries: z.boolean().optional() }).default({}),
+  params: z.object({ id: z.string().trim().min(1).max(60) }),
+});
+
+export const createEntrySchema = z.object({
+  body: z.object({
+    description: z.string().trim().min(1, 'Descrição é obrigatória').max(500),
+    categoryId: z.string().trim().min(1, 'Categoria é obrigatória').max(60),
+    supplierId: z.string().trim().max(60).nullable().optional(),
+  }),
+  params: z.object({ id: z.string().trim().min(1).max(60) }),
+});
+
+export const suggestionsSchema = z.object({
+  body: z.object({}).optional(),
+  params: z.object({ id: z.string().trim().min(1).max(60) }),
+});
+
+export const bulkConfirmSchema = z.object({
+  body: z.object({
+    ids: z.array(z.string().trim().min(1).max(60)).min(1, 'Informe ao menos um id').max(100),
+  }),
+});
+
+export const reconciliationSummarySchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({}).optional(),
+});

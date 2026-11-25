@@ -13,6 +13,10 @@ import otherIncomesRoutes from './other-incomes/other-incomes.routes';
 import overviewRoutes from './reports/overview.routes';
 import importsRoutes from './imports/imports.routes';
 import bankTransactionsRoutes from './bank-transactions/bank-transactions.routes';
+import { authenticate, checkPermission } from '../../../middlewares/auth.jwt';
+import { validateZod } from '../../../middlewares/validate';
+import { reconciliationSummarySchema } from './bank-transactions/bank-transactions.schemas';
+import { reconciliationSummary } from './bank-transactions/bank-transactions.controller';
 
 // F1.1c: cadastros e caixas registradas. Módulos F2/F3 entram aqui quando
 // implementados; cada subpasta mantém .routes/.controller/.service/.schemas.
@@ -31,5 +35,14 @@ router.use('/payables', payablesRoutes);
 router.use('/receivables', receivablesRoutes);
 router.use('/other-incomes', otherIncomesRoutes);
 router.use('/overview', overviewRoutes);
+
+// [F2.5] Resumo agregado de conciliação (spec §7.6.5).
+router.get(
+  '/reconciliation/summary',
+  authenticate,
+  checkPermission('finance.bank.view'),
+  validateZod(reconciliationSummarySchema),
+  reconciliationSummary
+);
 
 export default router;
