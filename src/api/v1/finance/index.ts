@@ -11,6 +11,7 @@ import payablesRoutes from './payables/payables.routes';
 import receivablesRoutes from './receivables/receivables.routes';
 import otherIncomesRoutes from './other-incomes/other-incomes.routes';
 import overviewRoutes from './reports/overview.routes';
+import importsRoutes from './imports/imports.routes';
 
 // F1.1c: cadastros e caixas registradas. Módulos F2/F3 entram aqui quando
 // implementados; cada subpasta mantém .routes/.controller/.service/.schemas.
@@ -20,6 +21,7 @@ router.use('/settings', settingsRoutes);
 router.use('/categories', categoriesRoutes);
 router.use('/suppliers', suppliersRoutes);
 router.use('/bank-accounts', bankAccountsRoutes);
+router.use('/imports', importsRoutes);
 router.use('/acquirers', acquirersRoutes);
 router.use('/cash', cashRoutes);
 router.use('/card-receivables', cardReceivablesRoutes);

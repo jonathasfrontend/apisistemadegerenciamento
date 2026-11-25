@@ -10,8 +10,10 @@
  */
 import { spawnSync } from 'node:child_process';
 
+// 127.0.0.1 em vez de localhost: no Windows o `localhost` pode resolver ::1
+// primeiro e o Prisma falha com P1001 mesmo com o container healthy.
 const TEST_DB_URL =
-  'postgresql://salao:salao_test@localhost:55432/salao_test?sslmode=disable';
+  'postgresql://salao:salao_test@127.0.0.1:55432/salao_test?sslmode=disable';
 const env = { ...process.env, DATABASE_URL: TEST_DB_URL, NODE_ENV: 'test' };
 
 function run(command, args, label) {

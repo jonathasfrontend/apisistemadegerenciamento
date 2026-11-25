@@ -70,6 +70,9 @@ const TEST_PERMISSIONS = [
   // F1.4: a fachada A pagar usa as mesmas 5 permissões do seed de produção.
   'finance.payables.list', 'finance.payables.create', 'finance.payables.update',
   'finance.payables.pay', 'finance.payables.delete',
+  // F2.2: importação de extrato, conciliação e regras (permissões já existem
+  // em prisma/seed.ts:135-139 — aqui só o papel da fixture precisa delas).
+  'finance.bank.import', 'finance.reconcile', 'finance.rules.manage',
 ];
 
 export async function seedTwoTenants(): Promise<TenantFixture> {

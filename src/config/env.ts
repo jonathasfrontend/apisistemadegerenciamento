@@ -54,6 +54,20 @@ interface EnvConfig {
   maxFileSize: number;
   allowedFileTypes: string[];
   
+  // Finance (F2) — importação de extratos e armazenamento de arquivos
+  financeMaxOfxMb: number;
+  financeMaxPdfMb: number;
+  /** Chave AES-256-GCM (hex 64 chars ou base64 de 32 bytes). Vazio = storage indisponível. */
+  financeFileKey: string;
+  financeStorageDriver: 'LOCAL' | 'S3';
+  financeStorageLocalPath: string;
+  financeS3Bucket: string;
+  financeS3Region: string;
+  financeS3Endpoint: string;
+  financeS3AccessKey: string;
+  financeS3SecretKey: string;
+  financeImportRateLimitPerHour: number;
+  
   // URLs
   frontendUrl: string;
   backendUrl: string;
@@ -123,6 +137,26 @@ export const env: EnvConfig = {
   // File Upload
   maxFileSize: parseInt(getEnvVarOptional('MAX_FILE_SIZE', '5242880'), 10),
   allowedFileTypes: getEnvVarOptional('ALLOWED_FILE_TYPES', 'image/jpeg,image/png').split(','),
+  
+  // Finance (F2) — spec §7.1 (FINANCEIRO_IMPLEMENTACAO.md:1207-1218).
+  // A chave e o bucket são opcionais no *boot* (a API responde 503 quando
+  // faltam) — quebrar a aplicação inteira por config de finance seria pior.
+  financeMaxOfxMb: parseInt(getEnvVarOptional('FINANCE_MAX_OFX_MB', '10'), 10),
+  financeMaxPdfMb: parseInt(getEnvVarOptional('FINANCE_MAX_PDF_MB', '20'), 10),
+  financeFileKey: getEnvVarOptional('FINANCE_FILE_KEY'),
+  financeStorageDriver: (getEnvVarOptional('FINANCE_STORAGE_DRIVER', 'LOCAL').toUpperCase() === 'S3'
+    ? 'S3'
+    : 'LOCAL'),
+  financeStorageLocalPath: getEnvVarOptional('FINANCE_STORAGE_LOCAL_PATH', './storage/finance'),
+  financeS3Bucket: getEnvVarOptional('FINANCE_S3_BUCKET'),
+  financeS3Region: getEnvVarOptional('FINANCE_S3_REGION', 'us-east-1'),
+  financeS3Endpoint: getEnvVarOptional('FINANCE_S3_ENDPOINT'),
+  financeS3AccessKey: getEnvVarOptional('FINANCE_S3_ACCESS_KEY'),
+  financeS3SecretKey: getEnvVarOptional('FINANCE_S3_SECRET_KEY'),
+  financeImportRateLimitPerHour: parseInt(
+    getEnvVarOptional('FINANCE_IMPORT_RATE_LIMIT_PER_HOUR', '20'),
+    10
+  ),
   
   // URLs
   frontendUrl: getEnvVar('FRONTEND_URL', 'http://localhost:3000'),

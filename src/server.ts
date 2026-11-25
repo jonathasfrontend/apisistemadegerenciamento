@@ -18,6 +18,7 @@ const startServer = async () => {
     let notificationWorker: { close: () => Promise<void> } | undefined;
     let financeRecurringWorker: { close: () => Promise<void> } | undefined;
     let financeOverdueWorker: { close: () => Promise<void> } | undefined;
+    let financeImportWorker: { close: () => Promise<void> } | undefined;
     try {
       const { notificationWorker: worker } = await import('./jobs/notification.worker');
       const { startAppointmentStartReconciler } = await import('./jobs/appointment-start');
@@ -42,6 +43,14 @@ const startServer = async () => {
       logger.info('✓ Job de alerta de vencimento financeiro iniciado');
     } catch (error: any) {
       logger.warn('Job de alerta de vencimento financeiro indisponível (Redis):', error?.message);
+    }
+
+    try {
+      const { startFinanceImportWorker } = await import('./jobs/finance-import');
+      financeImportWorker = startFinanceImportWorker();
+      logger.info('✓ Worker de importação financeira iniciado');
+    } catch (error: any) {
+      logger.warn('Worker de importação financeira indisponível (Redis):', error?.message);
     }
 
     // Start server
@@ -69,6 +78,10 @@ const startServer = async () => {
         if (financeOverdueWorker) {
           await financeOverdueWorker.close().catch(() => undefined);
           logger.info('Finance overdue worker closed');
+        }
+        if (financeImportWorker) {
+          await financeImportWorker.close().catch(() => undefined);
+          logger.info('Finance import worker closed');
         }
 
         await prisma.$disconnect();
